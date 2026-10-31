@@ -85,6 +85,10 @@ def test_pruning_keeps_manual_current_previous_and_recent_releases(tmp_path,monk
 
 def test_workflow_pins_actions_and_deploys_branches_after_tests_with_one_lock():
     source=(ROOT/'.github/workflows/aws-validation.yml').read_text()
+    import yaml
+    workflow=yaml.load(source,Loader=yaml.BaseLoader)
+    assert set(workflow['on'])=={'push','pull_request','workflow_dispatch'}
+    assert workflow['jobs']['deploy']['needs']=='validate'
     assert "branches: ['**']" in source and 'pull_request_target' not in source
     assert "github.event_name != 'pull_request'" in source and "startsWith(github.ref, 'refs/heads/')" in source
     assert 'needs: validate' in source and "vars.AWS_DEPLOY_ENABLED == 'true'" in source
