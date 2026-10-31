@@ -1,0 +1,16 @@
+# Runtime tested against the local application; Linux/Python 3.12 lock below.
+# CPU-only torch is resolved from its explicit index, never a CUDA dependency set.
+torch==2.14.0+cpu
+sentence-transformers==6.0.1
+qdrant-client==1.19.1
+beautifulsoup4>=4.12
+lxml>=5
+httpx==0.28.1
+pyyaml>=6
+fastapi==0.141.1
+uvicorn==0.53.0
+pypdf==6.18.1
+# Keep embedding/tokenizer behavior aligned with the tested local snapshot.
+transformers==5.17.0
+huggingface-hub==1.31.0
+numpy==2.5.3

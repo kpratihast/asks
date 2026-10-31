@@ -1,0 +1,45 @@
+{
+  "documents": [
+    {
+      "id": "student-course-schedule-ad2026",
+      "title": "Course Schedule for Aug-Dec 2026 term",
+      "access_scope": "student",
+      "doc_type": "schedule",
+      "academic_term": "2026-AUG",
+      "original": ".local/private/course-schedule-ad2026.png",
+      "extracted": ".local/private/course-schedule-ad2026.html",
+      "sha256": "f793eea4f8cfb4f9a5601f359f6e9af6e47a6806bbf3410d0c2469859f1d8d2b",
+      "extracted_sha256": "8770e1ff4e97bfecb2ed817413278158b2a40a51adfbb8767ef425ce957b8f80",
+      "gate_patterns": [
+        "\\b(?:course|class|lecture|student)\\s+(?:schedule|time\\s*table|timings?)\\b",
+        "\\b(?:schedule|time\\s*table)\\s+(?:of|for)\\s+(?:DS\\s*\\d|courses?|classes|lectures)\\b",
+        "\\b(?:first class|class timings?|days of (?:the )?week)\\b",
+        "\\b(?:when|what time|which days?|where|venue|classroom|room)\\b.*\\bDS\\s*\\d",
+        "\\bDS\\s*\\d+\\b.*\\b(?:when|what time|which days?|venue|classroom|room|timings?|schedule|first class)\\b",
+        "\\b(?:hardcore|softcore|colou?r indicator)\\b",
+        "\\b(?:timetable|time table)\\b",
+        "\\b(?:student[ -](?:only|exclusive)|attached image|course-schedule-ad2026)\\b"
+      ],
+      "classification": "Explicit user instruction, 2026-10-29",
+      "query_topic": "course_schedule"
+    },
+    {
+      "id": "faculty-exam-timetable-ad2026",
+      "title": "Final Examination Timetable (Aug-Dec 2026 Term)",
+      "access_scope": "faculty",
+      "doc_type": "schedule",
+      "academic_term": "2026-AUG",
+      "original": ".local/private/exam-timetable-ad2026.pdf",
+      "extracted": ".local/private/exam-timetable-ad2026.html",
+      "sha256": "0dd9e0164aa87b09921c95fd079125b6276c145e397e1183bf942178d62fa815",
+      "extracted_sha256": "fe510d5855bf77f144067d2151ce67ba38889b58663bb62c54fdcb6c61a47313",
+      "gate_patterns": [
+        "\\b(?:exam(?:ination)?s?|forenoon|afternoon session|last (?:date|day) of classes|SCC|written concurrence)\\b",
+        "\\b(?:faculty|professor)[ -]only\\b",
+        "\\b(?:signed pdf|attached pdf|exam[_ -]time[_ -]table|professor[ -]exclusive)\\b"
+      ],
+      "classification": "Explicit user instruction, 2026-10-29",
+      "query_topic": "course_examination"
+    }
+  ]
+}

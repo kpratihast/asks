@@ -1,0 +1,10 @@
+{
+  "VLLM_URL": "https://openrouter.ai/api/v1",
+  "SERVED_MODEL": "liquid/lfm-2.5-2.6b:free",
+  "MAX_MODEL_LEN": 4096,
+  "MAX_OUTPUT_TOKENS": 1024,
+  "CHAT_TEMPLATE_KWARGS": {},
+  "MODEL_REASONING": {"enabled": true},
+  "GLOBAL_CONCURRENCY": 1,
+  "TENANT_CONCURRENCY": 1
+}

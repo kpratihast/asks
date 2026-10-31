@@ -1,0 +1,37 @@
+{
+  "active": "local",
+  "aws": {
+    "profile": "askiisc-deploy",
+    "account": "800168266746",
+    "region": "ap-south-1",
+    "stack": "askiisc-prod"
+  },
+  "runtime_file": "~/.config/askiisc/aws-runtime.json",
+  "profiles": {
+    "local": {
+      "provider": "local",
+      "endpoint": "https://YOUR_TUNNEL.ngrok-free.app/v1",
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+      "chat_template_kwargs": {"enable_thinking": false},
+      "max_model_len": 4096,
+      "max_output_tokens": 512
+    },
+    "openrouter": {
+      "provider": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "api_key_file": "~/.config/askiisc/openrouter.key",
+      "provider_preferences": {
+        "data_collection": "deny",
+        "zdr": true,
+        "sort": "price",
+        "max_price": {"prompt": 0.1, "completion": 0.1, "request": 0}
+      },
+      "reasoning": {},
+      "max_model_len": 4096,
+      "max_output_tokens": 512,
+      "test_budget_usd": 0.001
+    }
+  }
+}

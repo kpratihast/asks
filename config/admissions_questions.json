@@ -1,0 +1,238 @@
+{
+  "note": "Exploratory development checks, not a held-out benchmark. Evidence-group checks are stricter than URL presence; factual rubrics are regex proxies, reviewed separately.",
+  "questions": [
+    {
+      "id": "duration-stipend",
+      "question": "For the regular CDS M.Tech., how long is the programme, how many coursework credits are required, and what monthly IISc scholarship is listed for M.Tech. students?",
+      "facts": [
+        "24 months|2.year|two.year",
+        "36",
+        "12[,]?400"
+      ],
+      "groups": [
+        {
+          "url": "course-degrees/",
+          "pattern": "24 months"
+        },
+        {
+          "url": "fees-and-scholarships/",
+          "pattern": "12400"
+        }
+      ]
+    },
+    {
+      "id": "fees-test",
+      "question": "What are the General and SC/ST/PwD application fees at IISc, and what maths and programming topics should a shortlisted CDS M.Tech. applicant prepare for the written test?",
+      "facts": [
+        "800",
+        "400",
+        "linear algebra",
+        "data structures"
+      ],
+      "groups": [
+        {
+          "alternatives": [
+            {
+              "url": "fees-and-scholarships/",
+              "pattern": "800"
+            },
+            {
+              "url": "Mid-year-Admission-Notice-2026-27.pdf",
+              "pattern": "800"
+            }
+          ]
+        },
+        {
+          "url": "course-degrees/",
+          "pattern": "linear algebra"
+        }
+      ]
+    },
+    {
+      "id": "departments-labs",
+      "question": "Does choosing up to three departments in the IISc application mean the same thing as choosing up to three labs in the CDS research admission form? Explain the two limits.",
+      "facts": [
+        "three|3",
+        "department|discipline",
+        "lab",
+        "Candidate Information|information form"
+      ],
+      "groups": [
+        {
+          "url": "faq/",
+          "pattern": "3 departments"
+        },
+        {
+          "url": "research-degrees/",
+          "pattern": "three labs|3 labs"
+        }
+      ]
+    },
+    {
+      "id": "gate-disciplines",
+      "question": "For CDS M.Tech. admission, is the GATE DA paper accepted, what academic background is expected, and how many M.Tech. disciplines can I apply to at IISc?",
+      "facts": [
+        "DA|Data Science and Artificial Intelligence",
+        "B.?E|B.?Tech|M.?Sc",
+        "three|3"
+      ],
+      "groups": [
+        {
+          "url": "m-tech-m-des/",
+          "pattern": "DA"
+        },
+        {
+          "url": "m-tech-m-des/",
+          "pattern": "three|3"
+        }
+      ]
+    },
+    {
+      "id": "annual-cost",
+      "question": "How long is the CDS M.Tech. programme and what is the first-year GN/OBC/EWS M.Tech. fee total shown by IISc? Which deposits in that total are refundable?",
+      "facts": [
+        "24 months|2.year|two.year",
+        "35[,]?800",
+        "statutory",
+        "library",
+        "7[,]?500"
+      ],
+      "groups": [
+        {
+          "url": "course-degrees/",
+          "pattern": "24 months"
+        },
+        {
+          "url": "fees-and-scholarships/",
+          "pattern": "35,800"
+        }
+      ]
+    },
+    {
+      "id": "contacts",
+      "question": "Which email handles general IISc admissions queries, and which email does CDS list for M.Tech. programme-specific questions?",
+      "facts": [
+        "admission.acad@iisc.ac.in",
+        "chair.cds@iisc.ac.in"
+      ],
+      "groups": [
+        {
+          "alternatives": [
+            {
+              "url": "admission-unit-contact-details/",
+              "pattern": "admission.acad"
+            },
+            {
+              "url": "faq/",
+              "pattern": "admission.acad"
+            }
+          ]
+        },
+        {
+          "url": "course-degrees/",
+          "pattern": "chair.cds"
+        }
+      ]
+    },
+    {
+      "id": "selection-conflict",
+      "question": "Compare the selection procedure for CDS M.Tech. in the central IISc M.Tech. admissions page with the CDS August 2026 course admissions page. Do they agree about an oral interview?",
+      "facts": [
+        "no oral interview|no.*interview|not.*interview",
+        "70|30|written.*interview",
+        "conflict|differ|discrepan|inconsisten|contradict"
+      ],
+      "groups": [
+        {
+          "url": "m-tech-m-des/",
+          "pattern": "70%"
+        },
+        {
+          "url": "course-degrees/",
+          "pattern": "NO ORAL INTERVIEW"
+        }
+      ]
+    },
+    {
+      "id": "cfti",
+      "question": "Must CFTI applicants to CDS M.Tech. also take the written test, and does IISc guarantee every CFTI M.Tech. entrant an institute scholarship? Mention the IIT CGPA exception if any.",
+      "facts": [
+        "written",
+        "not|no|ordinarily",
+        "IIT",
+        "8",
+        "12[,]?400"
+      ],
+      "groups": [
+        {
+          "url": "course-degrees/",
+          "pattern": "CFTI"
+        },
+        {
+          "url": "fees-and-scholarships/",
+          "pattern": "CGPA"
+        }
+      ]
+    },
+    {
+      "id": "midyear-boundary",
+      "question": "Does the January 2027 mid-year admission notice establish that CDS admits students then? Is Brain, Computation, and Data Science the same department, and what does its corrigendum say?",
+      "facts": [
+        "not|no|cannot|doesn.t",
+        "Brain|BCD",
+        "no students|not.*admit|no.*admi|withdraw"
+      ],
+      "groups": [
+        {
+          "url": "Mid-year-Admission-Notice-2026-27.pdf",
+          "pattern": "Brain"
+        },
+        {
+          "url": "CORRIGENDUM-MID-2026-revised.pdf",
+          "pattern": "no students"
+        }
+      ]
+    },
+    {
+      "id": "date-conflict",
+      "question": "For the January 2027 mid-year cycle, compare the interview dates in the original admission notice PDF and Important Dates page. Do the two ranges agree?",
+      "facts": [
+        "16.*20|20.*November",
+        "16.*19|19.*November",
+        "differ|disagree|conflict|not.*agree|discrepan"
+      ],
+      "groups": [
+        {
+          "url": "Mid-year-Admission-Notice-2026-27.pdf",
+          "pattern": "20.11.2026"
+        },
+        {
+          "url": "important-dates/",
+          "pattern": "19"
+        }
+      ]
+    },
+    {
+      "id": "public-entrance-exam",
+      "question": "Which GATE exam papers are accepted for CDS M.Tech. admissions, and is a written test required after shortlisting?",
+      "facts": [
+        "DA",
+        "written",
+        "required|mandatory|must|take|yes"
+      ],
+      "groups": [
+        {
+          "url": "course-degrees/",
+          "pattern": "DA"
+        }
+      ]
+    },
+    {
+      "id": "future-unknown",
+      "question": "What is the exact application deadline for CDS M.Tech. August 2028 admissions?",
+      "facts": [],
+      "groups": [],
+      "abstain": true
+    }
+  ]
+}

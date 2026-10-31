@@ -1,0 +1,523 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Ask IISc single-node MVP: HTTPS, private releases, durable state, SSM operations. External LLM required.",
+  "Parameters": {
+    "DomainName": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "(?:|(?:[a-zA-Z0-9][a-zA-Z0-9-]*\\.)+[a-zA-Z]{2,63})",
+      "Description": "Optional hostname you control. Leave empty for HTTPS on the Elastic IP."
+    },
+    "InstanceProfileName": {
+      "Type": "String",
+      "AllowedPattern": "[A-Za-z0-9+=,.@_-]{1,128}",
+      "Description": "Existing app-only EC2 instance profile, created once by iam_bootstrap.py."
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t3.small",
+      "AllowedValues": [
+        "t3.small",
+        "t3.medium"
+      ],
+      "Description": "Start with 2 GiB; choose t3.medium if memory or load requires it."
+    },
+    "AmiId": {
+      "Type": "AWS::EC2::Image::Id",
+      "Description": "Resolved and pinned AL2023 x86_64 AMI. The CLI preserves this value on updates."
+    },
+    "RuntimeParameter": {
+      "Type": "String",
+      "Default": "/askiisc/prod/runtime",
+      "AllowedPattern": "/[a-zA-Z0-9_./-]+",
+      "Description": "Existing or subsequently created Standard SecureString JSON parameter."
+    },
+    "DataVolumeGiB": {
+      "Type": "Number",
+      "Default": 20,
+      "MinValue": 20,
+      "MaxValue": 100
+    },
+    "ClientCidr": {
+      "Type": "String",
+      "Default": "0.0.0.0/0",
+      "Description": "Who can access HTTPS. Port 80 stays public for ACME validation."
+    },
+    "BudgetEmail": {
+      "Type": "String",
+      "Default": "",
+      "Description": "Optional email for account-wide monthly budget alerts."
+    },
+    "MonthlyBudgetUsd": {
+      "Type": "Number",
+      "Default": 20,
+      "MinValue": 1,
+      "Description": "AWS Budgets uses USD; alert only, not a spending cap."
+    }
+  },
+  "Conditions": {
+    "HasDomain": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "DomainName"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "HasBudgetEmail": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "BudgetEmail"
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "Vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.78.0.0/16",
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true
+      }
+    },
+    "Gateway": {
+      "Type": "AWS::EC2::InternetGateway"
+    },
+    "GatewayAttachment": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "InternetGatewayId": {
+          "Ref": "Gateway"
+        }
+      }
+    },
+    "Subnet": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "CidrBlock": "10.78.1.0/24",
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": ""
+            }
+          ]
+        },
+        "MapPublicIpOnLaunch": true
+      }
+    },
+    "RouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        }
+      }
+    },
+    "InternetRoute": {
+      "Type": "AWS::EC2::Route",
+      "DependsOn": "GatewayAttachment",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "RouteTable"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "Gateway"
+        }
+      }
+    },
+    "SubnetRoute": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "Subnet"
+        },
+        "RouteTableId": {
+          "Ref": "RouteTable"
+        }
+      }
+    },
+    "SecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "HTTPS chat; SSM administration; no SSH or database listeners",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": {
+              "Ref": "ClientCidr"
+            }
+          }
+        ]
+      }
+    },
+    "ReleaseBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Fn::Sub": "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-releases"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "BackupRetention",
+              "Status": "Enabled",
+              "Prefix": "backups/",
+              "ExpirationInDays": 30,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 7
+              }
+            },
+            {
+              "Id": "IncompleteUploads",
+              "Status": "Enabled",
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 1
+              }
+            }
+          ]
+        }
+      }
+    },
+    "BucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "ReleaseBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "ReleaseBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${ReleaseBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "DataVolume": {
+      "Type": "AWS::EC2::Volume",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": ""
+            }
+          ]
+        },
+        "Size": {
+          "Ref": "DataVolumeGiB"
+        },
+        "VolumeType": "gp3",
+        "Encrypted": true,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-state"
+            }
+          }
+        ]
+      }
+    },
+    "AppInstance": {
+      "Type": "AWS::EC2::Instance",
+      "DependsOn": [
+        "InternetRoute",
+        "SubnetRoute"
+      ],
+      "CreationPolicy": {
+        "ResourceSignal": {
+          "Timeout": "PT20M"
+        }
+      },
+      "Properties": {
+        "ImageId": {
+          "Ref": "AmiId"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "InstanceProfileName"
+        },
+        "SubnetId": {
+          "Ref": "Subnet"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "SecurityGroup"
+          }
+        ],
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpEndpoint": "enabled",
+          "HttpPutResponseHopLimit": 1
+        },
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "VolumeSize": 16,
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "Volumes": [
+          {
+            "Device": "/dev/sdf",
+            "VolumeId": {
+              "Ref": "DataVolume"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-app"
+            }
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Sub": "#!/bin/bash\n# Rendered into stack.json UserData. CloudFormation replaces only the @@...@@ tokens.\nset -euo pipefail\numask 077\ndnf install -y aws-cfn-bootstrap\ntrap '/opt/aws/bin/cfn-signal -e $? --stack \"${AWS::StackName}\" --resource AppInstance --region \"${AWS::Region}\"' EXIT\ndnf install -y python3.12 python3.12-pip xfsprogs curl-minimal tar gzip util-linux\nsystemctl enable --now amazon-ssm-agent\nid askiisc >/dev/null 2>&1 || useradd --system --home-dir /var/lib/askiisc --shell /sbin/nologin askiisc\nid caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/askiisc/caddy --shell /sbin/nologin caddy\nDATA_VOLUME='${DataVolume}'\nSERIAL=$(printf '%s' \"$DATA_VOLUME\" | tr -d '-')\nDEVICE=''\nfor attempt in $(seq 1 120); do\n  DEVICE=$(lsblk -ndo PATH,SERIAL | awk -v serial=\"$SERIAL\" '$2==serial {print $1}')\n  if [ -n \"$DEVICE\" ]; then break; fi\n  sleep 2\ndone\n[ -n \"$DEVICE\" ] || { echo 'Persistent EBS device did not attach'; exit 1; }\nif ! blkid \"$DEVICE\"; then mkfs.xfs \"$DEVICE\"; fi\nUUID=$(blkid -s UUID -o value \"$DEVICE\")\nmkdir -p /var/lib/askiisc\nif ! grep -q \"UUID=$UUID \" /etc/fstab; then printf 'UUID=%s /var/lib/askiisc xfs defaults 0 2\\n' \"$UUID\" >> /etc/fstab; fi\nmountpoint -q /var/lib/askiisc || mount /var/lib/askiisc\nchown root:askiisc /var/lib/askiisc\nchmod 0711 /var/lib/askiisc\ninstall -d -m 0750 -o root -g askiisc /var/lib/askiisc/releases /var/lib/askiisc/venvs /etc/askiisc /etc/askiisc/releases\ninstall -d -m 0700 -o askiisc -g askiisc /var/lib/askiisc/auth /var/lib/askiisc/indexes\ninstall -d -m 0700 /var/lib/askiisc/backups /usr/local/lib/askiisc\ninstall -d -m 0700 -o caddy -g caddy /var/lib/askiisc/caddy\n# Swap covers installation/startup spikes on the small instance. T3 CPU credits remain in standard mode.\nif [ ! -f /var/lib/askiisc/swapfile ]; then\n  dd if=/dev/zero of=/var/lib/askiisc/swapfile bs=1M count=2048 status=none\n  chmod 0600 /var/lib/askiisc/swapfile\n  mkswap /var/lib/askiisc/swapfile\nfi\nif ! grep -q '/var/lib/askiisc/swapfile ' /etc/fstab; then echo '/var/lib/askiisc/swapfile none swap sw 0 0' >> /etc/fstab; fi\nswapon -a\nSITE_HOST='${DomainName}'\nTLS_CONFIG=''\nif [ -z \"$SITE_HOST\" ]; then\n  SITE_HOST='${ElasticIp}'\n  # IP addresses otherwise get an untrusted internal certificate by default.\n  # Explicit ACME issuer: never fall back to a self-signed certificate.\n  TLS_CONFIG='  tls {\n    issuer acme https://acme-v02.api.letsencrypt.org/directory {\n      profile shortlived\n    }\n  }'\nfi\ncat > /etc/askiisc/host.json <<EOF\n{\"domain\":\"$SITE_HOST\",\"region\":\"${AWS::Region}\",\"bucket\":\"${ReleaseBucket}\",\"parameter\":\"${RuntimeParameter}\"}\nEOF\nchown root:askiisc /etc/askiisc/host.json\nchmod 0640 /etc/askiisc/host.json\n# Official release archive, pinned by SHA-512. No unversioned install script.\ncurl --fail --location --retry 4 https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz -o /tmp/caddy.tar.gz\nprintf '%s  /tmp/caddy.tar.gz\\n' 'a7a433a1b133efc3c8d10eb0b99d52a24b5ef5c322dc77f5282182b1c0402139ab83f3a99f0c52409df77d20123fb0b523edad8a66d8f5e49136197bf61ef0e7' | sha512sum -c -\ntar -xzf /tmp/caddy.tar.gz -C /usr/local/bin caddy\nchmod 0755 /usr/local/bin/caddy\nrm /tmp/caddy.tar.gz\ninstall -d -m 0755 /etc/caddy\ncat > /etc/caddy/Caddyfile <<EOF\n{\n  default_sni $SITE_HOST\n}\n$SITE_HOST {\n$TLS_CONFIG\n  encode zstd gzip\n  @internal path /metrics /docs /redoc /openapi.json\n  respond @internal 404\n  header {\n    X-Content-Type-Options nosniff\n    Referrer-Policy same-origin\n    Strict-Transport-Security \"max-age=31536000\"\n  }\n  request_body {\n    max_size 32KB\n  }\n  reverse_proxy 127.0.0.1:8100 {\n    flush_interval -1\n  }\n}\nEOF\nchmod 0644 /etc/caddy/Caddyfile\ncat > /usr/local/bin/askiisc-start <<'EOF'\n#!/bin/bash\nset -euo pipefail\nmountpoint -q /var/lib/askiisc\nrelease=$(readlink -f /var/lib/askiisc/current)\nlockhash=$(sha256sum \"$release/deploy/aws/requirements.lock\" | cut -d ' ' -f 1)\nexec \"/var/lib/askiisc/venvs/$lockhash/bin/python\" \"$release/deploy/aws/runtime.py\" --release \"$release\"\nEOF\nchmod 0755 /usr/local/bin/askiisc-start\ncat > /etc/systemd/system/askiisc.service <<'EOF'\n[Unit]\nDescription=Ask IISc application\nAfter=network-online.target\nWants=network-online.target\nRequiresMountsFor=/var/lib/askiisc\nConditionPathExists=/var/lib/askiisc/current/release.json\n[Service]\nType=simple\nUser=askiisc\nGroup=askiisc\nExecStart=/usr/local/bin/askiisc-start\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=45\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=/var/lib/askiisc/auth /var/lib/askiisc/indexes\n[Install]\nWantedBy=multi-user.target\nEOF\ncat > /etc/systemd/system/caddy.service <<'EOF'\n[Unit]\nDescription=Ask IISc HTTPS proxy\nAfter=network-online.target\nWants=network-online.target\nRequiresMountsFor=/var/lib/askiisc\n[Service]\nType=notify\nUser=caddy\nGroup=caddy\nExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile\nExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile\nEnvironment=HOME=/var/lib/askiisc/caddy\nEnvironment=XDG_DATA_HOME=/var/lib/askiisc/caddy/data\nEnvironment=XDG_CONFIG_HOME=/var/lib/askiisc/caddy/config\nRestart=on-failure\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=/var/lib/askiisc/caddy\n[Install]\nWantedBy=multi-user.target\nEOF\ncat > /etc/systemd/system/askiisc-backup.service <<'EOF'\n[Unit]\nDescription=Back up Ask IISc OTP sessions to private S3\nRequiresMountsFor=/var/lib/askiisc\nConditionPathExists=/usr/local/lib/askiisc/host.py\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3.12 /usr/local/lib/askiisc/host.py backup\nUMask=0077\nEOF\ncat > /etc/systemd/system/askiisc-backup.timer <<'EOF'\n[Unit]\nDescription=Daily Ask IISc state backup\n[Timer]\nOnCalendar=*-*-* 03:00:00 UTC\nPersistent=true\nRandomizedDelaySec=300\n[Install]\nWantedBy=timers.target\nEOF\nmkdir -p /etc/systemd/journald.conf.d\nprintf '[Journal]\\nSystemMaxUse=128M\\nMaxRetentionSec=7day\\n' > /etc/systemd/journald.conf.d/askiisc.conf\nsystemctl restart systemd-journald\nsystemctl daemon-reload\nsystemctl enable askiisc.service caddy.service\n# The release command starts services after secrets and a release are installed.\necho 'Host provisioned. Store the runtime secret, deploy a release, then verify trusted HTTPS at the stack ApplicationUrl.'\n"
+          }
+        }
+      }
+    },
+    "ElasticIp": {
+      "Type": "AWS::EC2::EIP",
+      "DependsOn": "GatewayAttachment",
+      "Properties": {
+        "Domain": "vpc"
+      }
+    },
+    "IpAssociation": {
+      "Type": "AWS::EC2::EIPAssociation",
+      "Properties": {
+        "InstanceId": {
+          "Ref": "AppInstance"
+        },
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "ElasticIp",
+            "AllocationId"
+          ]
+        }
+      }
+    },
+    "Budget": {
+      "Type": "AWS::Budgets::Budget",
+      "Condition": "HasBudgetEmail",
+      "Properties": {
+        "Budget": {
+          "BudgetName": {
+            "Fn::Sub": "${AWS::StackName}-account-monthly"
+          },
+          "BudgetType": "COST",
+          "TimeUnit": "MONTHLY",
+          "BudgetLimit": {
+            "Amount": {
+              "Ref": "MonthlyBudgetUsd"
+            },
+            "Unit": "USD"
+          },
+          "CostTypes": {
+            "IncludeCredit": false,
+            "IncludeRefund": false
+          }
+        },
+        "NotificationsWithSubscribers": [
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 50,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "BudgetEmail"
+                }
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 80,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "BudgetEmail"
+                }
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 100,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "BudgetEmail"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {
+      "Value": {
+        "Ref": "AppInstance"
+      }
+    },
+    "PublicIp": {
+      "Value": {
+        "Ref": "ElasticIp"
+      }
+    },
+    "Domain": {
+      "Value": {
+        "Fn::If": [
+          "HasDomain",
+          {
+            "Ref": "DomainName"
+          },
+          {
+            "Ref": "ElasticIp"
+          }
+        ]
+      }
+    },
+    "ApplicationUrl": {
+      "Value": {
+        "Fn::If": [
+          "HasDomain",
+          {
+            "Fn::Sub": "https://${DomainName}"
+          },
+          {
+            "Fn::Sub": "https://${ElasticIp}"
+          }
+        ]
+      }
+    },
+    "ReleaseBucket": {
+      "Value": {
+        "Ref": "ReleaseBucket"
+      }
+    },
+    "DataVolumeId": {
+      "Value": {
+        "Ref": "DataVolume"
+      }
+    },
+    "RuntimeParameter": {
+      "Value": {
+        "Ref": "RuntimeParameter"
+      }
+    },
+    "AmiId": {
+      "Value": {
+        "Ref": "AmiId"
+      }
+    }
+  }
+}

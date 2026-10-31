@@ -1,0 +1,37 @@
+# Private inputs, indexes, model caches, sessions, machine configuration and reports
+.local/
+.venv/
+venv/
+data/
+assets/
+output/
+.hermes/
+.aws/
+.codex/
+.agents/
+config/local.json
+config/aws-models.json
+aws-models.json
+serving_keys.yaml
+.env
+.env.*
+!.env.example
+!*.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*credentials*.json
+*runtime*.json
+!deploy/aws/runtime.example.json
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.sqlite*
+*.db
+*.csv
+*_citations.jsonl
+.DS_Store
+# Historical evaluation notes can reproduce restricted source material.
+CONNECTED_QUESTIONS.md
+EMAIL_ACCESS.md

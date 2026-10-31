@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect":"Allow","Action":"cloudformation:DescribeStacks","Resource":"arn:aws:cloudformation:REGION:ACCOUNT_ID:stack/STACK_NAME/*"},
+    {"Effect":"Allow","Action":"s3:ListBucket","Resource":"arn:aws:s3:::RELEASE_BUCKET","Condition":{"StringLike":{"s3:prefix":["releases/*"]}}},
+    {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject"],"Resource":"arn:aws:s3:::RELEASE_BUCKET/releases/*"},
+    {"Effect":"Allow","Action":"ssm:SendCommand","Resource":["arn:aws:ec2:REGION:ACCOUNT_ID:instance/INSTANCE_ID","arn:aws:ssm:REGION::document/AWS-RunShellScript"]},
+    {"Effect":"Allow","Action":"ssm:GetCommandInvocation","Resource":"*"}
+  ]
+}

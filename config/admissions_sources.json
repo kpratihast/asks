@@ -1,0 +1,96 @@
+{
+  "boundary": "Public postgraduate admissions common rules and CDS programme panels; current mid-year notice and corrigendum. No archive, UG, other department panels, application portal, or recursive links.",
+  "limits": {
+    "sources": 14,
+    "total_bytes": 8388608,
+    "pdf_pages": 6,
+    "new_chunks": 180
+  },
+  "sources": [
+    {
+      "url": "https://www.iisc.ac.in/admissions/",
+      "label": "Admissions announcements",
+      "mode": "announcements",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/m-tech-through-cfti-mode-2/",
+      "label": "M.Tech through CFTI Mode",
+      "mode": "cfti",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/research-programmes/",
+      "label": "M.Tech. (Research) and Ph.D. Programmes",
+      "mode": "programmes",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/entry-modes-into-iisc/",
+      "label": "Entry Modes into IISc",
+      "mode": "skip",
+      "department": "IISc",
+      "reason": "Image-only entry flowchart: requires reviewed OCR; no text indexed."
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/fees-and-scholarships/",
+      "label": "Fees and Scholarship",
+      "mode": "fees",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/admission-unit-contact-details/",
+      "label": "Contact \u2013 Admissions Unit",
+      "mode": "general",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/overview/department-contact-details/",
+      "label": "Contact \u2013 Departments",
+      "mode": "contacts",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/important-dates/",
+      "label": "Important Dates",
+      "mode": "general",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/faq/",
+      "label": "FAQ",
+      "mode": "faq",
+      "department": "IISc"
+    },
+    {
+      "url": "https://cds.iisc.ac.in/admissions/course-degrees/",
+      "label": "CDS course admissions",
+      "mode": "cds",
+      "department": "CDS"
+    },
+    {
+      "url": "https://cds.iisc.ac.in/admissions/research-degrees/",
+      "label": "CDS research admissions",
+      "mode": "cds",
+      "department": "CDS"
+    },
+    {
+      "url": "https://www.iisc.ac.in/wp-content/uploads/2026/09/Mid-year-Admission-Notice-2026-27.pdf",
+      "label": "Mid-year notice Jan 2027",
+      "mode": "pdf",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/wp-content/uploads/2026/09/CORRIGENDUM-MID-2026-revised.pdf",
+      "label": "Corrigendum-1 Jan 2027",
+      "mode": "pdf",
+      "department": "IISc"
+    },
+    {
+      "url": "https://www.iisc.ac.in/admissions/m-tech-m-des/",
+      "label": "M.Tech. and M.Des.",
+      "mode": "programmes",
+      "department": "IISc"
+    }
+  ]
+}

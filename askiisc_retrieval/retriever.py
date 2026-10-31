@@ -1,0 +1,369 @@
+"""The retriever: question + user scopes -> ranked, citable passages from ONE active snapshot.
+
+Pipeline (each step is timed in RetrievalResult.timings_ms):
+  1. analyse      course codes and an explicit term from the question
+  2. embed        same pinned model as the index (FR-5; mismatch is an error, not a warning)
+  3. search       Qdrant, filtered to active versions + user scopes (+ a course-code pass, and a people
+                  pass over profile chunks for "who / which professor / which lab" questions)
+  4. term logic   schedule-type chunks: explicit term -> only that term; otherwise prefer the current
+                  term and keep one chunk per course (the latest one not after the current term)
+  5. rank         chunks whose heading names the asked course first, then by similarity
+  6. graph        bounded expansion; adds supporting chunks of facts, never the facts themselves.
+                  Any graph error or timeout -> vector-only result with degraded=True (FR-9)
+  7. audit        every returned passage re-checked against snapshot + scope; violators are dropped
+"""
+from __future__ import annotations
+
+import logging
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutTimeout
+
+from . import config
+from .contract import ChunkPayload, Passage, RetrievalResult
+from .query_analysis import QueryInfo, analyse, term_key, requested_relations
+
+
+def _tkey(term: str | None) -> tuple[int, int]:
+    return term_key(term) if term else (-1, -1)
+from .citations import build_citations
+from .rerank_text import rerank_input
+from .snapshot import SnapshotProvider
+from .stores import Embedder, GraphStore, QdrantStore, Reranker
+
+log = logging.getLogger("askiisc.retrieval")
+_graph_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="graph")
+
+
+class EmbeddingModelMismatch(RuntimeError):
+    pass
+
+
+class Retriever:
+    def __init__(self, embedder: Embedder, store: QdrantStore, snapshots: SnapshotProvider,
+                 graph: GraphStore | None = None, *, top_k: int = config.TOP_K,
+                 candidates: int = config.CANDIDATES, graph_extra: int = config.GRAPH_EXTRA,
+                 graph_hops: int = config.GRAPH_HOPS, graph_timeout_s: float = config.GRAPH_TIMEOUT_S,
+                 today_term: str | None = None, reranker: Reranker | None = None,
+                 rerank_pool: int = config.RERANK_POOL, rerank_min: float | None = config.RERANK_MIN,
+                 people_k: int = config.PEOPLE_K):
+        self.embedder, self.store, self.snapshots, self.graph = embedder, store, snapshots, graph
+        self.reranker, self.rerank_pool, self.rerank_min = reranker, rerank_pool, rerank_min
+        self.top_k, self.candidates = top_k, candidates
+        self.graph_extra, self.graph_hops, self.graph_timeout_s = graph_extra, graph_hops, graph_timeout_s
+        self.today_term = today_term
+        self.people_k = people_k
+        from .private_documents import DocumentCatalog
+        self.document_catalog = DocumentCatalog()
+        self.audit_violations = 0                       # should stay 0 forever; surfaced in metrics
+
+    # ------------------------------------------------------------------ public
+    def retrieve(self, query: str, scopes: list[str], use_graph: bool = True,
+                 use_rerank: bool = True) -> RetrievalResult:
+        t0 = time.perf_counter()
+        timings: dict[str, float] = {}
+
+        def lap(name: str, since: float) -> float:
+            now = time.perf_counter()
+            timings[name] = round((now - since) * 1000, 1)
+            return now
+
+        snap = self.snapshots.active()
+        if snap.embedding_model != self.embedder.model_id:
+            raise EmbeddingModelMismatch(
+                f"query embedder {self.embedder.model_id!r} != snapshot model {snap.embedding_model!r}")
+        info = analyse(query, self.today_term)
+        t = lap("analyse", t0)
+
+        qvec = self.embedder.embed_query(query)
+        t = lap("embed", t)
+
+        hits = self.store.search(qvec, self.candidates, snap.active_version_ids, scopes, snap.embedding_model)
+        via = {c.chunk_id: "vector" for c, _ in hits}
+        if info.course_codes:                           # exact-identifier pass: dense vectors blur "DS 252"
+            for c, s in self.store.search(qvec, self.candidates, snap.active_version_ids, scopes,
+                                          snap.embedding_model, course_codes=info.course_codes):
+                if c.chunk_id not in via:
+                    hits.append((c, s))
+                    via[c.chunk_id] = "course_code"
+        people_hits = []                                # people pass: profile chunks for "who / which lab" questions
+        if info.wants_people and self.people_k:
+            people_hits = self.store.search(qvec, self.people_k, snap.active_version_ids, scopes,
+                                            snap.embedding_model, doc_types=list(config.PEOPLE_DOC_TYPES))
+        t = lap("search", t)
+
+        rerank = use_rerank and self.reranker is not None
+        pool = self.rerank_pool if rerank else self.top_k
+        ranked = self._rank(self._apply_term_logic(hits, info), info)[: max(pool, self.top_k)]
+        if rerank:                                      # people-pass chunks always reach the reranker, which
+            have = {c.chunk_id for c, _ in ranked}      # decides; a short profile chunk is otherwise cut by
+            for c, s in people_hits:                    # long general pages before it is ever scored (cf. q14)
+                if c.chunk_id not in have:
+                    ranked.append((c, s))
+                    have.add(c.chunk_id)
+                    via.setdefault(c.chunk_id, "people")
+        passages = [Passage(c, s, via[c.chunk_id]) for c, s in ranked]
+        t = lap("rank", t)
+
+        rerank_error = None
+        if rerank:                                      # before the graph, so graph seeds come from the best passages
+            rerank_error = self._rerank(query, passages)
+            passages = self._order(passages, info)[: self.top_k]
+            t = lap("rerank", t)
+
+        degraded, reason = False, None
+        if use_graph and self.graph is not None:
+            try:
+                extra = _graph_pool.submit(self._graph_passages, passages, info, snap, scopes) \
+                    .result(timeout=self.graph_timeout_s)
+                t = lap("graph", t)
+                if extra and rerank and rerank_error is None:
+                    rerank_error = self._rerank(query, extra)   # graph additions compete on the same scale
+                    t = lap("rerank_graph", t)
+                passages = self._order(passages + extra, info) if rerank else passages + extra
+            except FutTimeout:
+                degraded, reason = True, f"graph timeout after {self.graph_timeout_s}s"
+            except Exception as e:                      # any graph failure -> vector-only (FR-9 fallback)
+                degraded, reason = True, f"graph error: {type(e).__name__}: {e}"
+            if degraded:
+                log.warning("degraded retrieval: %s", reason)
+                t = lap("graph", t)
+
+        proof_passages, graph_proofs, connection_status = [], [], None
+        if use_graph:
+            from .connections import plan_for, resolve_connections
+            try:
+                plan = plan_for(info, self.graph)
+                if plan is not None:
+                    connection_status = "missing_path"
+                    if self.graph is not None:
+                        proof_passages, graph_proofs, connection_status = _graph_pool.submit(
+                            resolve_connections, self.graph, self.store, snap, scopes, plan
+                        ).result(timeout=self.graph_timeout_s)
+            except Exception as exc:
+                # A partial or failed join is never treated as a proved connected answer.
+                connection_status = "unavailable"
+                degraded, reason = True, f"connection error: {type(exc).__name__}"
+        policy_trace = {}
+        if use_graph and self.graph is not None and connection_status is None:
+            from .policy_graph import retrieve_policy
+            try:
+                policy_passages, policy_proofs, policy_trace = _graph_pool.submit(
+                    retrieve_policy, query, self.graph, self.store, snap, scopes
+                ).result(timeout=self.graph_timeout_s)
+                if policy_passages:
+                    proof_passages = policy_passages
+                    graph_proofs.extend(policy_proofs)
+            except Exception as exc:
+                degraded, reason = True, f"policy graph error: {type(exc).__name__}"
+                policy_trace = {"status": "unavailable"}
+        # Explicit document questions must retain the authorized document, even when exact
+        # course matches otherwise crowd the identifier-free exam lookup out of top-k.
+        targeted = self._document_passages(info, snap, scopes)
+        have = {p.chunk.chunk_id for p in targeted}
+        passages = targeted + [p for p in passages if p.chunk.chunk_id not in have]
+        if proof_passages:
+            proved = {p.chunk.chunk_id for p in proof_passages}
+            passages = proof_passages + [p for p in passages if p.chunk.chunk_id not in proved]
+        passages = self._audit(passages, snap.active_version_ids, scopes, snap.embedding_model)
+        timings["total"] = round((time.perf_counter() - t0) * 1000, 1)
+        scores = [p.rerank_score for p in passages if p.rerank_score is not None]
+        top = max(scores) if (rerank and rerank_error is None and scores) else None
+        sufficient = None if (top is None or self.rerank_min is None) else top >= self.rerank_min
+        if connection_status is not None and connection_status != "complete":
+            sufficient = False
+        citations = build_citations(passages)            # only audited passages can be cited
+        return RetrievalResult(query, passages, snap.snapshot_id, degraded, reason,
+                               info.target_term, timings, top, sufficient, rerank_error, citations,
+                               graph_proofs=graph_proofs, connection_status=connection_status, policy_trace=policy_trace)
+
+    # ------------------------------------------------------------------ steps
+    def _apply_term_logic(self, hits: list[tuple[ChunkPayload, float]], info: QueryInfo):
+        """Term-bound chunks (schedule rows) are versioned by term, not by document: an older term's
+        schedule is a valid page, so the version filter cannot remove it. Handle it here."""
+        timeless, by_key = [], {}
+        for c, s in hits:
+            if c.academic_term is None:
+                timeless.append((c, s))
+                continue
+            if info.term_is_explicit:
+                if c.academic_term == info.target_term:
+                    timeless.append((c, s))
+                continue
+            if term_key(c.academic_term) > term_key(info.target_term):
+                continue                                 # future term: not asked for
+            key = (c.document_id, c.course_codes[0] if c.course_codes else c.section_heading.split(" | ")[-1])
+            best = by_key.get(key)
+            if best is None or term_key(c.academic_term) > term_key(best[0].academic_term):
+                by_key[key] = (c, s)                     # keep the latest term <= current
+        out, seen_text = [], set()
+        for c, s in timeless + list(by_key.values()):
+            if c.text not in seen_text:                  # drop exact duplicates
+                seen_text.add(c.text)
+                out.append((c, s))
+        return out
+
+    @staticmethod
+    def _tier(c: ChunkPayload, info: QueryInfo) -> int:
+        if not info.course_codes:
+            return 0
+        heading = c.section_heading.upper().replace(" ", "")
+        if any(code in heading for code in info.course_codes):
+            return 0                                      # the asked course's own section/row
+        if any(code in c.course_codes for code in info.course_codes):
+            return 1                                      # mentions it
+        return 2
+
+    @classmethod
+    def _rank(cls, hits, info: QueryInfo):
+        return sorted(hits, key=lambda cs: (cls._tier(cs[0], info), -cs[1]))
+
+    @classmethod
+    def _order(cls, passages: list[Passage], info: QueryInfo) -> list[Passage]:
+        """Exact course match first (a deterministic signal), then cross-encoder relevance."""
+        return sorted(passages, key=lambda p: (cls._tier(p.chunk, info),
+                                               -(p.rerank_score if p.rerank_score is not None else -1.0)))
+
+    def _rerank(self, query: str, passages: list[Passage]) -> str | None:
+        """Sets rerank_score in place. A reranker failure keeps vector order (never fails the request).
+        Schedule rows are scored in BOTH forms (raw key-value and sentence) and keep the higher score:
+        the sentence lifted q18 from rank 8 to 1, but dropped q04 ('Who is the instructor for ...') from
+        0.839 to 0.134, below the abstention threshold. Max of both can only match or beat either form."""
+        texts, owners = [], []
+        for i, p in enumerate(passages):
+            raw = p.chunk.embedding_input()
+            texts.append(raw)
+            owners.append(i)
+            alt = rerank_input(p.chunk)
+            if alt != raw:
+                texts.append(alt)
+                owners.append(i)
+        try:
+            scores = self.reranker.score(query, texts)
+        except Exception as e:
+            log.warning("rerank failed, keeping vector order: %s", e)
+            return f"{type(e).__name__}: {e}"
+        best = [float("-inf")] * len(passages)
+        for i, sc in zip(owners, scores):
+            best[i] = max(best[i], float(sc))
+        for p, sc in zip(passages, best):
+            p.rerank_score = sc
+        return None
+
+    def _graph_passages(self, passages: list[Passage], info: QueryInfo, snap, scopes) -> list[Passage]:
+        """Seeds: courses and people named in the question (these define relevance), plus courses/people
+        in the top-3 passages. Only evidence edges contribute chunks; chunks connected to more of the
+        question's own entities rank first (q18: a course linked to BOTH named instructors)."""
+        query_seeds = [f"Course:{c}" for c in info.course_codes] + self.graph.find_people(info.query)
+        seeds = list(query_seeds)
+        for e in self.graph.entities_of_chunks([p.chunk.chunk_id for p in passages[:3]]):
+            if e.split(":", 1)[0] in ("Course", "Person") and e not in seeds:
+                seeds.append(e)
+        if not seeds:
+            return []
+        # No limit here: truncating before ranking by QUESTION-seed coverage can drop the one edge that
+        # links both people named in the question (seen on real data once reranking added more seeds).
+        hits = self.graph.expand(seeds, snap.active_version_ids, scopes, self.graph_hops, limit=None,
+                                 target_term=info.target_term, explicit=info.term_is_explicit,
+                                 now_term=self.today_term or config.current_term())
+        have = {p.chunk.chunk_id for p in passages}
+        qs = set(query_seeds)
+        requested = requested_relations(info.query)
+        # Anchor an indirect lab/research question to the instructor of the named
+        # course, rather than people found in unrelated vector seed passages.
+        focus_people = {q for q in qs if q.startswith("Person:")}
+        for course in (q for q in qs if q.startswith("Course:")):
+            teaching = [h.edge for h in hits if h.edge.src == course and h.edge.rel == "TAUGHT_BY"]
+            asked = [e for e in teaching if info.term_is_explicit and e.academic_term == info.target_term]
+            if asked:
+                teaching = asked
+            elif teaching:
+                latest = max((_tkey(e.academic_term) for e in teaching))
+                teaching = [e for e in teaching if _tkey(e.academic_term) == latest]
+            focus_people.update(e.dst for e in teaching)
+
+        # Group evidence by (course, term). Coverage = question entities DIRECTLY on the group's edges
+        # (2-hop reach would let every term of a course "cover" everything).
+        groups: dict[tuple, dict] = {}
+        for h in hits:
+            if not h.evidence:
+                continue                                     # bridges connect hops; never cited
+            e = h.edge
+            g = groups.setdefault((e.src, e.academic_term), {"cov": set(), "hop": h.hop, "chunks": [], "edges": [], "reach": set(), "focus": set(), "requested": False})
+            direct = {q for q in qs if q in (e.src, e.dst)}
+            g["cov"] |= direct
+            g["reach"] |= set(h.seeds) & qs
+            focused = focus_people & {e.src, e.dst}
+            g["focus"] |= focused
+            if e.rel in requested and (focused or not focus_people):
+                g["requested"] = True
+            g["hop"] = min(g["hop"], h.hop)
+            g["edges"].append((len(direct), e))
+            g["chunks"].extend(c for c in e.chunk_ids if c not in g["chunks"])
+        if not info.term_is_explicit:                        # one term per course: most coverage, then latest
+            best_term: dict[str, tuple] = {}
+            for (src, term), g in groups.items():
+                if term is None:
+                    continue
+                k = (len(g["cov"]), _tkey(term))
+                if src not in best_term or k > best_term[src][0]:
+                    best_term[src] = (k, term)
+            groups = {key: g for key, g in groups.items() if key[1] is None or best_term[key[0]][1] == key[1]}
+        # For "who / which lab" questions without a course code, a person's own facts (lab, research areas)
+        # come before the courses they taught.
+        person_first = info.wants_people and not info.course_codes
+        ordered = sorted(groups.items(), key=lambda kv: (
+            0 if kv[1]["requested"] else 1, -len(kv[1]["reach"]),
+            -len(kv[1]["cov"]), 0 if (person_first and kv[0][0].startswith("Person:")) else 1,
+            kv[1]["hop"], tuple(-x for x in _tkey(kv[0][1]))))
+        best: dict[str, tuple[int, int, str, dict]] = {}
+        for (src, term), g in ordered:
+            n = len(g["cov"])
+            why = f"links {n} entities named in the question" if n else f"{g['hop'] + 1} hops from the question"
+            for cid in g["chunks"]:
+                if cid not in have and cid not in best:
+                    # explain with the edge that this chunk supports (best question coverage first)
+                    e = max((ce for ce in g["edges"] if cid in ce[1].chunk_ids),
+                            key=lambda ce: (ce[1].rel in requested, ce[0]))[1]
+                    path = f"{e.src} -{e.rel}-> {e.dst} ({term + ', ' if term else ''}{why})"
+                    support = {"relation": e.rel, "entities": [e.src, e.dst],
+                               "coverage": n, "focus": len(g["focus"]),
+                               "question_seeds": sorted(g["reach"]), "hop": g["hop"] + 1}
+                    best[cid] = (n, g["hop"], path, support)
+        wanted = list(best.items())[: self.graph_extra]                 # already in priority order
+        got = {c.chunk_id: c for c in self.store.get([cid for cid, _ in wanted])}
+        floor = min((p.score for p in passages), default=0.0)
+        return [Passage(got[cid], floor, "graph", meta[2], graph_support=meta[3])
+                for cid, meta in wanted if cid in got]
+
+    def _document_passages(self, info, snap, scopes):
+        if not hasattr(self.store, 'document_chunks'):
+            return []
+        passages = []
+        words = set(re.findall(r'[a-z0-9]+', info.query.lower()))
+        docs = sorted(self.document_catalog.matching(info.query),
+                      key=lambda d: 0 if d['access_scope'] == 'faculty' else 1)
+        for doc in docs:
+            if doc['access_scope'] not in scopes:
+                continue
+            chunks = self.store.document_chunks('/v1/documents/' + doc['id'], snap.active_version_ids,
+                                                scopes, snap.embedding_model)
+            if info.term_is_explicit:
+                chunks = [c for c in chunks if not c.academic_term or c.academic_term == info.target_term]
+            chunks.sort(key=lambda c: (self._tier(c, info),
+                                       -len(words & set(re.findall(r'[a-z0-9]+', c.text.lower()))), c.ordinal))
+            for c in chunks[:3]:
+                passages.append(Passage(c, 1.0, 'document'))
+        return passages
+
+    def _audit(self, passages: list[Passage], version_ids, scopes, model) -> list[Passage]:
+        ok = []
+        for p in passages:
+            c = p.chunk
+            if c.version_id in version_ids and c.access_scope in scopes and c.embedding_model == model:
+                ok.append(p)
+            else:
+                self.audit_violations += 1
+                log.error("AUDIT: dropped chunk %s (version=%s scope=%s)", c.chunk_id, c.version_id, c.access_scope)
+        return ok

@@ -1,0 +1,196 @@
+# Retrieval dev set (NOT the held-out evaluation set; keep those separate and unseen).
+#
+# Gold is labelled at (url, section) level, not chunk_id, so it survives re-chunking.
+# A gold spec matches a passage when ALL of its given fields match:
+#   url, heading_contains, text_contains, term (academic_term), exclude_heading
+# A question is a hit@k if ANY gold spec matches a top-k passage
+# (multihop questions use need_all: true -> every gold spec must be matched).
+#
+# verified: false  -> drafted from what was visible remotely; check against your fetched pages with
+#                     `python -m askiisc_retrieval.cli show-chunks --grep "DS 252"` and fix before trusting numbers.
+# Current term when drafted: 2026-AUG.
+
+questions:
+  - id: q01
+    category: answerable
+    question: "Who teaches DS 252 this semester?"
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 252", term: "2026-AUG"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q02
+    category: term
+    question: "Where was DS 252 held in the Aug-Dec 2025 term?"
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 252", term: "2025-AUG"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q03
+    category: answerable
+    question: "What are the prerequisites for DS 393?"
+    gold: [{url: "https://cds.iisc.ac.in/courses/descriptions/", heading_contains: "DS 393", text_contains: "requisite"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q04
+    category: answerable
+    question: "Who is the instructor for Ethics in AI?"
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 307", term: "2026-AUG"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q05
+    category: answerable
+    question: "What topics does the Numerical Optimization course cover?"
+    gold: [{url: "https://cds.iisc.ac.in/courses/descriptions/", heading_contains: "DS 211"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q06
+    category: term
+    question: "Who taught DS 216 in January 2026?"
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 216", term: "2026-JAN"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q07
+    category: version_leak
+    question: "How many credits must M.Tech CDS students complete?"
+    # Corrected 2026-10-05: the answer (36 coursework + 28 dissertation credits) is on the admissions page;
+    # the requirements page only links to embedded documents.
+    gold: [{url: "https://cds.iisc.ac.in/admissions/course-degrees/", text_contains: "credits"}]
+    forbidden_markers: ["SUPERSEDED-FIXTURE"]
+    verified: true
+
+  - id: q08
+    category: unanswerable
+    question: "What is the minimum CGPA to continue in the M.Tech programme?"
+    # Checked 2026-10-06: no active CDS page states this (the requirements page only links to embedded
+    # documents). The ONLY indexed text with a CGPA rule is the superseded fixture, so the right outcome is
+    # nothing relevant returned (abstain) and zero leaks.
+    gold: []
+    forbidden_markers: ["SUPERSEDED-FIXTURE"]
+    verified: true
+
+  - id: q09
+    category: answerable
+    question: "Which degree programmes does CDS offer?"
+    gold: [{url: "https://cds.iisc.ac.in/academics/degree-programs/"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q10
+    category: answerable
+    question: "What does the PhD selection process at CDS involve?"
+    # Reworded 2026-10-06: the page covers selection (aptitude test, interview) for shortlisted candidates,
+    # not how or where to apply.
+    gold: [{url: "https://cds.iisc.ac.in/admissions/research-degrees/"}]
+    verified: true
+
+  - id: q11
+    category: answerable
+    question: "What is the admission process for the M.Tech in Computational and Data Science for 2026?"
+    gold: [{url: "https://cds.iisc.ac.in/admissions/course-degrees/"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q12
+    category: scope_leak
+    question: "By when must CDS lab access cards be renewed?"
+    scopes: [public]
+    gold: []                      # guest: the only answer is student-only -> nothing should come back for it
+    forbidden_markers: ["STUDENT-ONLY-FIXTURE"]
+    verified: true
+
+  - id: q13
+    category: scope_positive
+    question: "By when must CDS lab access cards be renewed?"
+    scopes: [public, student]
+    gold: [{url: "internal://cds/student-notices/lab-access-2026"}]
+    verified: true
+
+  - id: q14
+    category: answerable
+    question: "What research does CDS do in data management and analytics?"
+    gold: [{url: "https://cds.iisc.ac.in/research-new/data-management-computing-and-analytics/"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q15
+    category: answerable
+    question: "Which faculty work on software and runtime systems?"
+    gold: [{url: "https://cds.iisc.ac.in/research-new/software-and-runtime-systems/"}]
+    verified: true  # checked 2026-10-06
+
+  - id: q16
+    category: multihop
+    question: "What other courses does the DS 252 instructor teach this semester?"
+    # Corrected 2026-10-05: in 2026-AUG Yogesh Simmhan teaches only DS 252, so the correct answer is "none";
+    # retrieval must surface his 2026-AUG row and the system must not invent a second course.
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 252", term: "2026-AUG"}]
+    verified: true
+
+  - id: q17
+    category: unanswerable
+    question: "What is the monthly mess fee at the IISc hostels?"
+    gold: []                      # out of corpus: used to calibrate the abstention threshold (top_score)
+    verified: true
+
+  - id: q18
+    category: alias
+    question: "Which course have Sathish Vadhiyar and Yogesh Simmhan taught together?"
+    # Schedule rows spell them "S.Vadhiyar & Y. Simmhan", "S. Vadhiyar, Y. Simmhan" ... (alias resolution)
+    # Tightened 2026-10-06: the row must list Simmhan. DS 221's 2025/2026 rows are Vadhiyar + C. Jain and
+    # do NOT answer the question; the earlier spec (any DS 221 row) wrongly counted them as hits.
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 221", text_contains: "Simmhan"}]
+    verified: true
+
+  - id: q19
+    category: multihop
+    question: "Which course did the DS 252 instructor teach in the Jan-Apr 2026 term?"
+    # Cross-term hop: DS 252 -> instructor (current term) -> course in 2026-JAN (DS 256).
+    # KNOWN LIMITATION: graph expansion applies the asked term (2026-JAN) to every hop, so the first hop
+    # (DS 252 is not taught in 2026-JAN) finds nothing. See README "Open items".
+    gold: [{url: "https://cds.iisc.ac.in/courses/schedule/", heading_contains: "DS 256", term: "2026-JAN"}]
+    verified: true
+
+  # ---- people / lab questions (added 2026-10-08, BEFORE building the people pass and the research-area
+  # graph edges). Topics deliberately avoid IoT, biology and medical imaging, the subjects of the held-out
+  # test questions that first showed this weakness (t04, t05). Gold = the person's People-page
+  # "Research Interests" section, as seen in `show-chunks --grep "Research Interests"` on 2026-10-08.
+  - id: q20
+    category: people
+    question: "I want to do research in natural language processing. Which CDS professor should I approach?"
+    # Added 2026-10-08 after dev_v15: the lab listing "3. Natural Language ... Lab" with "Faculty: Danish
+    # Pruthi" also answers the question (it names whom to approach), so it counts as gold too.
+    gold: [{heading_contains: "Danish Pruthi"}, {heading_contains: "List of labs", text_contains: "Pruthi"}]
+    verified: true  # checked 2026-10-08
+
+  - id: q21
+    category: people
+    question: "Who at CDS works on database systems?"
+    gold: [{heading_contains: "Haritsa"}, {text_contains: "Database Systems (Design"}]
+    verified: true  # checked 2026-10-08
+
+  - id: q22
+    category: people
+    question: "Which faculty member works on uncertainty quantification and ocean modelling?"
+    gold: [{heading_contains: "Deepak N Subramani"}]
+    verified: true  # checked 2026-10-08
+
+  - id: q23
+    category: people
+    question: "Which professors at CDS work on computer vision?"
+    gold: [{heading_contains: "Venkatesh Babu R"}, {heading_contains: "Vaanathi Sundaresan"}]
+    verified: true  # checked 2026-10-08
+
+  - id: q24
+    category: people
+    question: "Is anyone in the department doing research on quantum computing?"
+    gold: [{heading_contains: "Phani Motamarri"}]
+    verified: true  # checked 2026-10-08
+
+  - id: q25
+    category: people
+    question: "I enjoy GPU programming and parallel computing. Who could be my advisor?"
+    gold: [{heading_contains: "Sathish S Vadhiyar"}]
+    verified: true  # checked 2026-10-08
+
+  - id: q26
+    category: unanswerable
+    # Replaced 2026-10-08: the first version asked about blockchain, but the corpus mentions blockchain
+    # in DREAM:Lab (Yogesh Simmhan) pages, so it was answerable.
+    question: "Which CDS professor works on archaeology?"
+    gold: []
+    verified: true  # checked 2026-10-08: 0 chunks for "archaeolog"

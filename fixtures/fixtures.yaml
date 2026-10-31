@@ -1,0 +1,18 @@
+# Synthetic documents that exist only to test retrieval filters. They are indexed alongside the
+# real CDS pages. Every one contains a marker string so tests and the eval script can detect leaks.
+fixtures:
+  # Same URL as the real M.Tech requirements page, but an OLDER version that is NOT in the active
+  # snapshot. Retrieval must never return it (FR-9: no superseded passages).
+  - file: superseded_mtech_requirements.html
+    url: "https://cds.iisc.ac.in/courses/m-tech-course-requirements/"
+    doc_type: policy
+    scope: public
+    active: false
+    version_tag: "synthetic-old-2023"
+
+  # Student-only notice. Guest/applicant queries (scope: public) must never see it.
+  - file: student_notice_lab_access.html
+    url: "internal://cds/student-notices/lab-access-2026"
+    doc_type: handbook
+    scope: student
+    active: true

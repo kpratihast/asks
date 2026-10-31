@@ -1,0 +1,133 @@
+# HELD-OUT TEST SET (from Aditya, received 2026-10-07). Converted to the dev_questions.yaml format.
+#
+# RULES: do not tune retrieval on these questions. Run once on a fixed configuration and report the
+# result. If something is changed after seeing a test question fail, that question becomes dev data.
+#
+# Gold = the pages Aditya cited (any one matching page counts as a hit). For questions with several
+# sources, eval also reports how many of them were found (gold_found).
+# Expected answers are kept as `expected` for the generation/citation evaluation later.
+#
+# Gold labels and expected answers are EXACTLY as Aditya wrote them. "suggestion:" notes are proposals
+# from the retrieval side; only Aditya (the evaluator) changes labels.
+
+questions:
+  - id: t01
+    category: answerable
+    question: "How do I contact the CDS Department?"
+    expected: "Phone +91-80-2293 2789; Fax +91-80-2360 6332; E-mail office.cds@iisc.ac.in; Web cds.iisc.ac.in"
+    gold: [{url: "https://cds.iisc.ac.in/contact-us/"}]
+
+  - id: t02
+    category: needs_decision
+    question: "From where can I reserve the CDS room?"
+    expected: "Link to the Outlook room calendar (IISc login)"
+    gold: []
+    # suggestion: the only source is a link in the site's "Shortcuts" sidebar. Sidebars are stripped as
+    # boilerplate, so this cannot be retrieved as-is. Decide: (a) treat as unanswerable (abstain), or
+    # (b) ingestion keeps the Shortcuts block as its own document. Not scored until decided.
+
+  - id: t03
+    category: answerable
+    question: "What are the recent awards won by the CDS Faculty?"
+    expected: "Phani Motamarri: Prof. Priti Shankar Award for Teaching Excellence 2026; Sravanti Addepalli: Sir Vithal N. Chandavarkar Memorial Medal"
+    gold:
+      - {url: "https://cds.iisc.ac.in/cds-faculty-phani-motamarri-receives-prof-priti-shankar-award-for-teaching-excellence-2026/"}
+      - {url: "https://cds.iisc.ac.in/dr-sravanti-addepalli-receives-the-prestigious-sir-vithal-n-chandavarkar-memorial-medal/"}
+    # suggestion: "recent" depends on the snapshot date; fine with a frozen snapshot.
+
+  - id: t04
+    category: answerable
+    question: "I've a interest in Internet Of Things, whom should I approach to in CDS dept."
+    expected: "Yogesh Simmhan"
+    gold: [{url: "https://cds.iisc.ac.in/people/yogesh-simmhan/"}]
+
+  - id: t05
+    category: multi_source
+    question: "I've a bio background which labs and professors would be the right fit as per my interest"
+    expected: "Anirban Chakraborty (VCL); Chirag Jain (ATCG); Sekar K; Debnath Pal; Vaanathi Sundaresan (BioMedia); Phaneendra Kumar (MIG)"
+    gold:
+      - {url: "https://cds.iisc.ac.in/people/chirag-jain/"}
+      - {url: "https://cds.iisc.ac.in/people/sekar-k/"}
+      - {url: "https://cds.iisc.ac.in/people/debnath-pal/"}
+      - {url: "https://cds.iisc.ac.in/people/vaanathi-sundaresan/"}
+      - {url: "https://cds.iisc.ac.in/people/phaneendra-kumar-yalavarthy/"}
+    # suggestion: the expected answer names Anirban Chakraborty, but his profile is not cited; and the
+    # Bioinformatics research page is a natural source. Add them as gold? (Aditya to decide.)
+
+  - id: t06
+    category: answerable
+    question: "Is DSL Lab a part of CDS department or CSA department?"
+    expected: "It is a joint lab of both departments"
+    gold:
+      - {url: "https://dsl.cds.iisc.ac.in/"}
+      - {url: "https://cds.iisc.ac.in/research-new/data-management-computing-and-analytics/"}
+    # CSA page excluded (outside the CDS corpus, as Aditya noted).
+
+  - id: t07
+    category: answerable
+    question: "What are the programs offered?"
+    expected: "PhD, Mtech Research and Mtech Coursework"
+    gold: [{url: "https://cds.iisc.ac.in/academics/degree-programs/"}]
+    # suggestion: the page also lists B.Tech. Math and Computing. Add it to the expected answer? (Aditya)
+
+  - id: t08
+    category: answerable
+    question: "What is the difference between Computational Science and Computer and data systems inside CDS?"
+    expected: "(from the About section)"
+    gold: [{url: "https://cds.iisc.ac.in/serc/"}]
+    # suggestion: expected answer still to be written out, for the answer-accuracy evaluation.
+
+  - id: t09
+    category: answerable
+    question: "What is the last date of classes?"
+    expected: "13.11.2026"
+    gold: [{url: "https://cds.iisc.ac.in/academics/calendar/", text_contains: "13.11.2026"}]
+
+  - id: t10
+    category: unanswerable
+    question: "Is there any Academic Announcement made?"
+    expected: "No / don't know; must not generate anything else"
+    gold: []
+
+  - id: t11
+    category: answerable
+    question: "Is there any library?"
+    expected: "JRD Tata Memorial Library"
+    gold: [{url: "https://cds.iisc.ac.in/internal-resources/library/"}]
+
+  - id: t12
+    category: answerable
+    question: "What all Travel forms can I access?"
+    expected: "TA Approval Form; TA Advance Form; TA Bill; DA Rates for Foreign Travel from 09-08-2011; Approved Rates for hiring Taxi and Other Vehicle @ IISc"
+    gold: [{url: "https://cds.iisc.ac.in/forms/"}]
+
+  - id: t13
+    category: answerable
+    question: "I have completed (or about to complete) B.E./B.Tech. degree, Can I apply to both M.Tech. (Computational and Data Science) and M.Tech. (Research) programs?"
+    expected: "Yes, with a valid GATE score"
+    gold: [{url: "https://cds.iisc.ac.in/admissions/admissions-faq/"}]
+
+  - id: t14
+    category: answerable
+    question: "Tell me the upcoming events"
+    expected: "Events listed as upcoming on the events page"
+    gold: [{url: "https://cds.iisc.ac.in/events/"}]
+    # suggestion: time-dependent; depends on the snapshot date.
+
+  - id: t15
+    category: answerable
+    question: "Generate names of 10 alumnis"
+    expected: "10 names from the alumni page"
+    gold: [{url: "https://cds.iisc.ac.in/people-all/alumni/"}]
+
+  - id: t16
+    category: answerable
+    question: "What are the major research topics of CDS Dept"
+    expected: "Software and Runtime Systems; Data Management, Computing and Analytics; Computational Science and Engineering; Bioinformatics"
+    gold: [{url: "https://cds.iisc.ac.in/research-new/"}]
+
+  - id: t17
+    category: answerable
+    question: "What does Software and Runtime Systems cover in CDS Research area?"
+    expected: "Runtime frameworks for HPC and accelerated computing; middleware for batch systems; computing and data platforms for cloud and edge; software and analytics frameworks for IoT; compiler optimization"
+    gold: [{url: "https://cds.iisc.ac.in/research-new/software-and-runtime-systems/"}]

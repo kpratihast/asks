@@ -1,0 +1,968 @@
+# Held-out test set from the evaluation team, converted unchanged. DO NOT tune on it.
+questions:
+- id: CDS001
+  category: research_admissions
+  question: Which research degree programmes does CDS discuss on its research admissions page?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: The page describes admissions to the Ph.D. and M.Tech. (Research) programmes.
+  section_label: Overview
+- id: CDS002
+  category: research_admissions
+  question: How many phases are in the 2026 CDS research admission process for shortlisted candidates?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: 'The process has two phases: an in-person computer-based aptitude test and an oral interview.'
+  section_label: Overview
+- id: CDS003
+  category: research_admissions
+  question: Where is the Phase I research-admissions aptitude test held?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: It is held in person in the CDS department, at the CDS labs.
+  section_label: In-Person Computer-Based Aptitude Test
+- id: CDS004
+  category: research_admissions
+  question: What must a shortlisted candidate complete to appear in Phase I?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: The candidate must complete the Online Student Information Form.
+  section_label: In-Person Computer-Based Aptitude Test
+- id: CDS005
+  category: research_admissions
+  question: Which mathematics topics are listed for the CDS research-admissions aptitude test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Combinatorics, linear algebra/matrices, probability and statistics, differential equations, and interpreting
+    plots.
+  section_label: Aptitude-test syllabus
+- id: CDS006
+  category: research_admissions
+  question: Which programming languages are allowed for the programming part of the CDS research aptitude test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Python, C, C++, or Java.
+  section_label: Aptitude-test syllabus
+- id: CDS007
+  category: research_admissions
+  question: Which platform is used for the CDS research-admissions computer-based aptitude test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: The test uses the HackerEarth online platform on a computer provided at the department.
+  section_label: Aptitude-test format
+- id: CDS008
+  category: research_admissions
+  question: Approximately how long is the Phase I aptitude test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Around 45 minutes.
+  section_label: Aptitude-test format
+- id: CDS009
+  category: research_admissions
+  question: How many mathematics questions are described for the research aptitude test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Five questions are listed for Part A (Mathematics).
+  section_label: Aptitude-test format
+- id: CDS010
+  category: research_admissions
+  question: How many programming questions are described for the research aptitude test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Four questions are listed for Part B (Programming).
+  section_label: Aptitude-test format
+- id: CDS011
+  category: research_admissions
+  question: Does the research aptitude test provide candidates with a computer?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Yes. Candidates are provided a computer and do not need to bring their personal computers.
+  section_label: Aptitude-test format
+- id: CDS012
+  category: research_admissions
+  question: Is code auto-completion available during the programming test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: No. The page says no code assistance or auto-complete will be available.
+  section_label: Aptitude-test format
+- id: CDS013
+  category: research_admissions
+  question: What kinds of programming tasks may appear in the aptitude test besides implementing logic?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Candidates may be asked to debug a code block or critique a solution devised by an LLM agent-based coding
+    system.
+  section_label: Aptitude-test format
+- id: CDS014
+  category: research_admissions
+  question: What basic topics may be covered in the oral interview?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Linear algebra; probability and statistics; programming, data structures and algorithms; numerical methods;
+    ordinary differential equations; and discrete mathematics.
+  section_label: In-Person Oral Interview
+- id: CDS015
+  category: research_admissions
+  question: At what academic level should candidates prepare for the basic oral-interview topics?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: At the final-year undergraduate engineering level.
+  section_label: In-Person Oral Interview
+- id: CDS016
+  category: research_admissions
+  question: How many labs may a shortlisted research applicant choose in the Online Candidate Information Form?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Up to three labs.
+  section_label: Online Candidate Information Form
+- id: CDS017
+  category: research_admissions
+  question: Where should shortlisted research applicants look for their interview call letter?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: They should log in to the IISc Admissions portal and check for the call letter; the page also says the
+    Admissions office will send a call letter or email.
+  section_label: Overview
+- id: CDS018
+  category: research_admissions
+  question: Does CDS say that every research lab necessarily admits M.Tech. (Research) students?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: No. The page says some labs may not take M.Tech. (Research) students, and most labs give preference to
+    Ph.D. applicants.
+  section_label: In-Person Oral Interview
+- id: CDS019
+  category: research_admissions
+  question: Can a candidate with a B.E./B.Tech. degree apply directly for a Ph.D. according to the CDS research-admissions
+    page?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Yes. The page explicitly says candidates with a B.E./B.Tech. degree are eligible to apply directly for
+    the Ph.D. programme.
+  section_label: In-Person Oral Interview
+- id: CDS020
+  category: research_admissions
+  question: What was the approximate number of applications reported for the 2026 CDS research admissions cycle?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: The page reports 1,589 applications.
+  section_label: Recent Announcements
+- id: CDS021
+  category: research_admissions
+  question: Approximately how many candidates were shortlisted for interviews in the 2026 CDS research-admissions cycle?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Around 1,000 candidates were shortlisted.
+  section_label: Recent Announcements
+- id: CDS022
+  category: research_admissions
+  question: Approximately how many candidates attended the 2026 CDS research interviews?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Approximately 500 candidates attended over five days.
+  section_label: Recent Announcements
+- id: CDS023
+  category: research_admissions
+  question: How many offers were extended at the conclusion of the 2026 CDS research-admissions process?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Around 30 offers were extended.
+  section_label: Recent Announcements
+- id: CDS024
+  category: labs
+  question: Which topics are listed for the ATCG lab interview?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Algorithm design and analysis, data structures, and basic graph algorithms.
+  section_label: ATCG lab
+- id: CDS025
+  category: labs
+  question: What is the main research focus of the ATCG lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: It works at the intersection of computer science and biology, developing algorithms and open-source tools
+    for large-scale DNA and RNA sequencing data.
+  section_label: ATCG lab
+- id: CDS026
+  category: labs
+  question: Who is listed as the faculty member for the Biomedical Image Analysis (BioMedIA) Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Vaanathi Sundaresan.
+  section_label: BioMedIA Lab
+- id: CDS027
+  category: labs
+  question: What are some research interests of the BioMedIA Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: AI-based biomedical image analysis, scalable machine-learning tools, MR imaging biomarkers, multimodal
+    federated learning, semi-supervised imaging, domain adaptation, and medical-image reconstruction and quality improvement.
+  section_label: BioMedIA Lab
+- id: CDS028
+  category: labs
+  question: Who is listed as the faculty member for the Biomolecular Computation Laboratory?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Debnath Pal.
+  section_label: Biomolecular Computation Laboratory
+- id: CDS029
+  category: labs
+  question: What kinds of biological data does the Biomolecular Computation Laboratory study?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Its scope includes genomics, proteomics, metabolomics, structural biology, health and disease, methods,
+    and algorithms.
+  section_label: Biomolecular Computation Laboratory
+- id: CDS030
+  category: labs
+  question: Who is listed as the faculty member for CSPL?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Murugesan Venkatapathi.
+  section_label: Computation, Statistics & Physics Lab
+- id: CDS031
+  category: labs
+  question: What broad research-interest areas are listed for CSPL?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Theoretical and computational models in condensed matter physics, randomized algorithms and statistical
+    computing, and numerical methods and scientific computing.
+  section_label: Computation, Statistics & Physics Lab
+- id: CDS032
+  category: labs
+  question: Who leads FLAME:Lab according to the research admissions page?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Konduri Aditya.
+  section_label: FLAME:Lab
+- id: CDS033
+  category: labs
+  question: What types of problems does FLAME:Lab focus on?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Multi-scale, multi-physics fluid-flow problems using high-performance computing and machine learning.
+  section_label: FLAME:Lab
+- id: CDS034
+  category: labs
+  question: Name two current project areas listed for FLAME:Lab.
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Examples include machine-learning-based reduced-order modelling for reacting flows, scalable asynchronous
+    PDE solvers, low-precision computing, hydrogen combustion, and extreme-event detection/forecasting.
+  section_label: FLAME:Lab
+- id: CDS035
+  category: labs
+  question: Who is listed as the faculty member for MATRIX:Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Phani Motamarri.
+  section_label: MATRIX:Lab
+- id: CDS036
+  category: labs
+  question: What areas intersect in MATRIX:Lab's research?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Quantum mechanics, continuum physics, material modelling, numerical linear algebra, high-performance computing,
+    and AI for science.
+  section_label: MATRIX:Lab
+- id: CDS037
+  category: labs
+  question: What is DFT-FE in the context of the MATRIX:Lab page?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: It is described as a massively parallel open-source code that students contribute to; the page calls it
+    the workhorse behind the 2023 ACM Gordon Bell Prize.
+  section_label: MATRIX:Lab
+- id: CDS038
+  category: labs
+  question: Who is listed as the faculty member for the Medical Imaging Group (MIG)?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Phaneendra Yalavarthy.
+  section_label: Medical Imaging Group
+- id: CDS039
+  category: labs
+  question: What does the Medical Imaging Group focus on?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: AI-powered medical imaging, including deep-learning methods for medical-image reconstruction and analysis
+    with an emphasis on fast, clinically deployable solutions.
+  section_label: Medical Imaging Group
+- id: CDS040
+  category: labs
+  question: Who is listed as the faculty member for NATL Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Ratikanta Behera.
+  section_label: NATL Lab
+- id: CDS041
+  category: labs
+  question: Name three research areas listed for NATL Lab.
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Examples include tensor computations, physics-informed neural networks, numerical linear algebra, neural
+    operators, numerical PDE solutions, wavelet-based machine learning, and quantum machine learning for scientific computing.
+  section_label: NATL Lab
+- id: CDS042
+  category: labs
+  question: Who is listed as the faculty member for QUEST Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Deepak N. Subramani.
+  section_label: QUEST Lab
+- id: CDS043
+  category: labs
+  question: What are the current research interests of QUEST Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Scientific machine learning and AI for science and engineering, including multimodal AI, foundation models
+    for scientific data, physical intelligence, and neural data assimilation.
+  section_label: QUEST Lab
+- id: CDS044
+  category: labs
+  question: Which three broad interview areas are listed for DREAM:Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Operating systems, graph algorithms, or distributed systems.
+  section_label: DREAM:Lab
+- id: CDS045
+  category: labs
+  question: What does DREAM:Lab work on?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Distributed systems, scalable ML platforms, and large-scale graph analytics across cloud, edge, and emerging
+    quantum environments.
+  section_label: DREAM:Lab
+- id: CDS046
+  category: labs
+  question: Name two 2026 research topics listed for DREAM:Lab.
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Examples include agentic AI platforms for cyber-physical systems, serverless agentic-AI orchestration,
+    federated learning and LLM fine-tuning on edge accelerators, quantum-classical workflows, billion-scale graph mining,
+    and private blockchain/consensus.
+  section_label: DREAM:Lab
+- id: CDS047
+  category: labs
+  question: Who leads the MARS Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Sathish Vadhiyar.
+  section_label: MARS Lab
+- id: CDS048
+  category: labs
+  question: What is the MARS Lab's broad research area?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: High-performance and parallel computing, including middleware, system software, algorithms, and applications
+    on large parallel computers and GPUs.
+  section_label: MARS Lab
+- id: CDS049
+  category: labs
+  question: Name two research topics listed for MARS Lab.
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Examples include hybrid CPU/GPU computing for AI/ML, new parallelism models for ML/DL, and fault-tolerance
+    frameworks for parallel scientific and ML/DL applications.
+  section_label: MARS Lab
+- id: CDS050
+  category: labs
+  question: Who leads the NLP Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Danish Pruthi.
+  section_label: Natural Language Processing Lab
+- id: CDS051
+  category: labs
+  question: What research themes are listed for the NLP Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Detecting AI-generated content, measuring and improving geo-cultural representation in AI, and evaluating
+    large language models for responsible use.
+  section_label: Natural Language Processing Lab
+- id: CDS052
+  category: labs
+  question: Who leads the Vision and AI Lab (VAL)?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: R. Venkatesh Babu.
+  section_label: Vision and AI Lab
+- id: CDS053
+  category: labs
+  question: Name three research areas listed for VAL.
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Examples include representation learning, domain adaptation/generalization, adversarial attacks and defenses,
+    self-supervised learning, 3D vision, generative models, multimodal learning, and fairness/bias.
+  section_label: Vision and AI Lab
+- id: CDS054
+  category: labs
+  question: Who leads the Visual Computing Lab (VCL)?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Anirban Chakraborty.
+  section_label: Visual Computing Lab
+- id: CDS055
+  category: labs
+  question: What are the three broad areas of VCL's ongoing projects?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Data-efficient and privacy-preserving deep learning; learning across modalities/domains; and perceiving
+    humans and their actions.
+  section_label: Visual Computing Lab
+- id: CDS056
+  category: degree_programmes
+  question: Which research degree programmes are listed in the CDS degree-programmes summary?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: Ph.D. and M.Tech. (Research).
+  section_label: Degrees by Research
+- id: CDS057
+  category: degree_programmes
+  question: How long does the CDS Ph.D. programme typically last according to the degree summary?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: The summary says 3–5 years.
+  section_label: Degrees by Research
+- id: CDS058
+  category: degree_programmes
+  question: How many courses are described for the CDS Ph.D. programme in the degree summary?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: The summary says 3–6 courses, along with a research dissertation.
+  section_label: Degrees by Research
+- id: CDS059
+  category: degree_programmes
+  question: How long is the M.Tech. (Research) programme according to the degree summary?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: Two years.
+  section_label: Degrees by Research
+- id: CDS060
+  category: degree_programmes
+  question: How many courses are described for the M.Tech. (Research) programme in the degree summary?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: The summary says 3–4 courses, along with a research thesis.
+  section_label: Degrees by Research
+- id: CDS061
+  category: degree_programmes
+  question: What are the two streams named in the CDS degree-programmes summary?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: Computational Science (CDS-CP) and Computer and Data Systems (CD-CS).
+  section_label: Degrees by Research
+- id: CDS062
+  category: degree_programmes
+  question: What does the Computational Science stream broadly deal with?
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: Computational methods and their application to scientific domains.
+  section_label: Degrees by Research
+- id: CDS063
+  category: course_degree
+  question: What is the M.Tech. (Computational and Data Science) programme's stated duration?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: It is designed to be completed in 24 months.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS064
+  category: course_degree
+  question: How many coursework credits are required for the M.Tech. (CDS) programme?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Students take 36 credits of coursework over 2–3 semesters.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS065
+  category: course_degree
+  question: How many dissertation credits are specified for M.Tech. (CDS)?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: The dissertation project is worth 28 credits over a 12-month period.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS066
+  category: course_degree
+  question: How are the 36 coursework credits divided into categories for M.Tech. (CDS)?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: The page lists 14 hard-core credits, 10 soft-core credits, and 12 elective credits.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS067
+  category: course_degree
+  question: What interdisciplinary areas does the M.Tech. (CDS) programme bring together?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Computational science and data science, combining domain knowledge from science/engineering with computing
+    systems and formal foundations.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS068
+  category: course_degree
+  question: What kinds of application areas are mentioned for the M.Tech. (CDS) curriculum?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Bioinformatics, medical imaging, computational physics, and quantum computing are listed as diverse applications.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS069
+  category: course_degree
+  question: How long is the dissertation project in the M.Tech. (CDS) programme?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Twelve months.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS070
+  category: course_degree
+  question: Does the M.Tech. (CDS) programme allow students to continue to a Ph.D.?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Yes. The page says there is an option to continue for a Ph.D.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS071
+  category: course_degree
+  question: What does the M.Tech. (CDS) page say about placements?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: It states 100% placements with industry-leading compensation.
+  section_label: About the M.Tech. (CDS) Program
+- id: CDS072
+  category: course_degree
+  question: What is the stated written-test requirement for shortlisted M.Tech. (CDS) applicants in 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: An in-person written test is mandatory for all shortlisted students, including GATE and CFTI candidates.
+  section_label: Admission Process for Aug 2026
+- id: CDS073
+  category: course_degree
+  question: Does the 2026 M.Tech. (CDS) admission page describe an oral interview?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: No. It says there is no oral interview this year.
+  section_label: Admission Process for Aug 2026
+- id: CDS074
+  category: course_degree
+  question: Which foundations topics are listed for the M.Tech. (CDS) written test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Linear algebra/matrices, probability, combinatorics, basic calculus, and geometry.
+  section_label: Admission Process for Aug 2026
+- id: CDS075
+  category: course_degree
+  question: Which programming topics are listed for the M.Tech. (CDS) written test?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: Data structures (including arrays and matrices) and basic programming; C, C++, Python, and Java are allowed.
+  section_label: Admission Process for Aug 2026
+- id: CDS076
+  category: course_degree
+  question: Which GATE papers are listed as eligible for the 2026 M.Tech. (CDS) non-CFTI/CFTI modes?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: The page lists AE, BT, CE, CH, CS, EC, EE, IN, DA, MA, ME, MT, PH, and ST.
+  section_label: Eligibility
+- id: CDS077
+  category: course_degree
+  question: What academic background does the M.Tech. (CDS) page say is required in all admission modes?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/course-degrees/
+  verified: true
+  expected_answer: A strong mathematical and programming background is required.
+  section_label: Eligibility
+- id: CDS078
+  category: courses
+  question: Who teaches DS 215 Introduction to Data Science in the Aug–Dec 2026 term?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Anirban Chakraborty.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS079
+  category: courses
+  question: How many credits are listed for DS 215 Introduction to Data Science in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '3:0.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS080
+  category: courses
+  question: When is the first class listed for DS 215 in the Aug–Dec 2026 schedule?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: August 6, 2026.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS081
+  category: courses
+  question: Who teaches DS 221 Introduction to Scalable Systems in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Sathish Vadhiyar and Chirag Jain.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS082
+  category: courses
+  question: What is the listed credit structure for DS 221 Introduction to Scalable Systems?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '3:1.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS083
+  category: courses
+  question: When is the first class for DS 221 in the Aug–Dec 2026 schedule?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: August 4, 2026.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS084
+  category: courses
+  question: Who teaches DS 284 Numerical Linear Algebra in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Phani Motamarri.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS085
+  category: courses
+  question: How many credits are listed for DS 284 Numerical Linear Algebra?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '2:1.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS086
+  category: courses
+  question: Who teaches DS 288 Numerical Methods in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Ratikanta Behera.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS087
+  category: courses
+  question: What is the listed credit structure for DS 288 Numerical Methods?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '3:0.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS088
+  category: courses
+  question: Who teaches DS 200 Research Methods?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Debnath Pal.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS089
+  category: courses
+  question: What is the credit structure for DS 200 Research Methods?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '0:1.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS090
+  category: courses
+  question: Who teaches DS 201 Bioinformatics in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Debnath Pal.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS091
+  category: courses
+  question: What is the credit structure listed for DS 201 Bioinformatics?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '2:0.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS092
+  category: courses
+  question: Who teaches DS 290 Modeling and Simulation in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Soumyendu Raha.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS093
+  category: courses
+  question: What is the listed credit structure for DS 290 Modeling and Simulation?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '3:0.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS094
+  category: courses
+  question: Who teaches DS 307 Ethics in AI in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Danish Pruthi.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS095
+  category: courses
+  question: What is the listed credit structure for DS 307 Ethics in AI?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '3:0.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS096
+  category: courses
+  question: Who teaches DS 252 Introduction to Cloud Computing in Aug–Dec 2026?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Yogesh Simmhan.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS097
+  category: courses
+  question: What is the credit structure for DS 252 Introduction to Cloud Computing?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: '3:1.'
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS098
+  category: courses
+  question: When is the first class for DS 252 Introduction to Cloud Computing listed?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: August 11, 2026.
+  section_label: Aug–Dec 2026 course schedule
+- id: CDS099
+  category: courses
+  question: How are CDS course registrations carried out according to the schedule page?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Course registrations happen online through SAP; campus network or VPN access is required.
+  section_label: Course Schedule introduction
+- id: CDS100
+  category: courses
+  question: Where are the timings of CDS courses listed?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: The page says course timings are mentioned on the CDS intranet page.
+  section_label: Course Schedule introduction
+- id: CDS101
+  category: unanswerable
+  question: What is the exact monthly stipend paid to every M.Tech. (Research) student in CDS in October 2026?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS102
+  category: unanswerable
+  question: What is the guaranteed hostel room number assigned to each incoming CDS student?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS103
+  category: unanswerable
+  question: What is the exact cutoff GATE score for admission to CDS M.Tech. (CDS) in 2026?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS104
+  category: unanswerable
+  question: How many marks will a candidate lose for each incorrect answer in the 2026 CDS research aptitude test?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS105
+  category: unanswerable
+  question: What is the private mobile number of the CDS admissions coordinator?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS106
+  category: unanswerable
+  question: Which exact questions will appear on the next CDS research-admissions aptitude test?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS107
+  category: unanswerable
+  question: What is the guaranteed salary package of the lowest-paid CDS M.Tech. (CDS) graduate in 2026?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS108
+  category: unanswerable
+  question: Which lab will definitely accept a particular applicant before the admissions committee makes its decision?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS109
+  category: unanswerable
+  question: What is the exact date and time of the 2027 CDS research-admissions interview?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS110
+  category: unanswerable
+  question: How many GPU-hours will my own project consume if I run it for 17 days on the institute cluster?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS111
+  category: unanswerable
+  question: What is the current password for the CDS student intranet?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS112
+  category: unanswerable
+  question: What is the private IP address of the CDS department's internal database server?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS113
+  category: unanswerable
+  question: Which CDS professor will supervise me personally next semester?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS114
+  category: unanswerable
+  question: What is the exact rank of a named applicant in the confidential CDS 2026 admissions list?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS115
+  category: unanswerable
+  question: What is the room temperature in CDS 202 on the next Monday at 10:15 AM?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS116
+  category: unanswerable
+  question: How many seats are still available in DS 252 right now?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS117
+  category: unanswerable
+  question: What is the exact number of students who will be placed through CDS in the 2027 graduating batch?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS118
+  category: unanswerable
+  question: What is the department's unpublished internal policy for waiving course prerequisites?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS119
+  category: unanswerable
+  question: What is the personal email address of a CDS student who is not listed on the official website?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''
+- id: CDS120
+  category: unanswerable
+  question: What is the exact answer key for the upcoming CDS written admission test?
+  gold: []
+  verified: true
+  expected_answer: ''
+  section_label: ''

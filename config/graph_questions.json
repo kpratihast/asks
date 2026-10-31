@@ -1,0 +1,475 @@
+{
+  "name": "local-graph-pilot-v1",
+  "snapshot_id": "snap-618aabd36c",
+  "created_before_retrieval": true,
+  "note": "Exploratory pilot; includes reworded development cases and related questions. Not an untouched held-out benchmark. Each gold group is an evidence requirement; any listed chunk satisfies that group. All groups required.",
+  "questions": [
+    {
+      "id": "D01",
+      "category": "direct",
+      "question": "Who teaches DS 252 in the Aug-Dec 2026 term?",
+      "expected_answer": "Yogesh Simmhan.",
+      "gold_groups": [
+        [
+          "d8facfafb828e04b2caa744cdd7fe120"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Simmhan"
+      ]
+    },
+    {
+      "id": "D02",
+      "category": "direct",
+      "question": "Where was DS 252 held in Aug-Dec 2025?",
+      "expected_answer": "CDS 419.",
+      "gold_groups": [
+        [
+          "0e6a3b6d8e1a17e1d47928b1e15e9262"
+        ]
+      ],
+      "required_fact_patterns": [
+        "CDS\\s*419"
+      ]
+    },
+    {
+      "id": "D03",
+      "category": "direct",
+      "question": "Name two optimization methods covered by DS 211.",
+      "expected_answer": "For example Newton/quasi-Newton and steepest descent.",
+      "gold_groups": [
+        [
+          "cdaa0c8078fa7c7412e0b4f046d3e44e"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Newton",
+        "steepest\\s+descent|conjugate\\s+gradient|trust.region|simplex|barrier|penalty"
+      ]
+    },
+    {
+      "id": "D04",
+      "category": "direct",
+      "question": "What background and practical knowledge are prerequisites for DS 393?",
+      "expected_answer": "Numerical methods/linear algebra/scalable systems/quantum mechanics; working knowledge of a DFT code and/or instructor consent.",
+      "gold_groups": [
+        [
+          "61f2798df999379d12917e42bbf22261"
+        ]
+      ],
+      "required_fact_patterns": [
+        "numerical|linear\\s+algebra|quantum|scalable",
+        "DFT|density.functional",
+        "consent|instructor"
+      ]
+    },
+    {
+      "id": "D05",
+      "category": "direct",
+      "question": "How many coursework and dissertation credits are required in the M.Tech CDS programme?",
+      "expected_answer": "36 coursework credits and 28 dissertation credits.",
+      "gold_groups": [
+        [
+          "3a8236c041439b5ba531ffd9fa2221a2",
+          "ac875c3f59f24bd29f79c817d240592f"
+        ]
+      ],
+      "required_fact_patterns": [
+        "\\b36\\b",
+        "\\b28\\b"
+      ]
+    },
+    {
+      "id": "D06",
+      "category": "direct",
+      "question": "Which DS courses are listed as prerequisite alternatives for DS 256?",
+      "expected_answer": "DS 221, DS 222 or DS 252; instructor consent is also an alternative.",
+      "gold_groups": [
+        [
+          "1fb930eb974e402f2a4208c28bcb5e4b"
+        ]
+      ],
+      "required_fact_patterns": [
+        "DS\\s*[-\u2013]?\\s*221",
+        "DS\\s*[-\u2013]?\\s*222",
+        "DS\\s*[-\u2013]?\\s*252"
+      ]
+    },
+    {
+      "id": "D07",
+      "category": "direct",
+      "question": "What research areas does the Software and Runtime Systems group cover?",
+      "expected_answer": "HPC/accelerated computing, batch middleware, cloud/edge platforms, IoT software/analytics and compiler optimization.",
+      "gold_groups": [
+        [
+          "b20738575286635336e7e138549b7169"
+        ]
+      ],
+      "required_fact_patterns": [
+        "high.performance|HPC|accelerated",
+        "cloud|edge",
+        "IoT|Internet\\s+of\\s+Things",
+        "compiler"
+      ]
+    },
+    {
+      "id": "D08",
+      "category": "direct",
+      "question": "Which faculty member leads the Natural Language Processing lab listed in research admissions?",
+      "expected_answer": "Danish Pruthi.",
+      "gold_groups": [
+        [
+          "dca2d60eafe89bb059336980e31b82d9"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Danish\\s+Pruthi"
+      ]
+    },
+    {
+      "id": "R01",
+      "category": "relationship",
+      "question": "Which course did the DS 252 instructor teach in the Jan-Apr 2026 term?",
+      "expected_answer": "Yogesh Simmhan taught DS 256, Scalable Systems for Data Science.",
+      "gold_groups": [
+        [
+          "37a02650bf07f524de0d65e1268acaa1",
+          "d8facfafb828e04b2caa744cdd7fe120"
+        ],
+        [
+          "5e85f9897d761b0ed318d44458b4f141"
+        ]
+      ],
+      "required_fact_patterns": [
+        "DS\\s*[-\u2013]?\\s*256",
+        "Simmhan"
+      ]
+    },
+    {
+      "id": "R02",
+      "category": "relationship",
+      "question": "Which course have Sathish Vadhiyar and Yogesh Simmhan taught together?",
+      "expected_answer": "DS 221, Introduction to Scalable Systems; for example Aug-Dec 2024.",
+      "gold_groups": [
+        [
+          "e02184fd1f7358beb78550c9dcbb6d4b",
+          "b940c3b13b4c891957397cff845f5942",
+          "1cac6fafeab7314cf868e910d2ca0fbd",
+          "10d68d8f92f8c656f61008f921337c87",
+          "558849eff83c5bea43811aefedd2512d",
+          "4474abbb469aea522f525182f29373f8"
+        ]
+      ],
+      "required_fact_patterns": [
+        "DS\\s*[-\u2013]?\\s*221"
+      ]
+    },
+    {
+      "id": "R03",
+      "category": "relationship",
+      "question": "Which lab does the DS 252 instructor lead?",
+      "expected_answer": "Yogesh Simmhan leads DREAM:Lab.",
+      "gold_groups": [
+        [
+          "37a02650bf07f524de0d65e1268acaa1",
+          "d8facfafb828e04b2caa744cdd7fe120"
+        ],
+        [
+          "7d033c10bcb4a9e6af4b57d9c877f157",
+          "f8713f81558b03f7aff4661a349ca200"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Simmhan",
+        "DREAM"
+      ]
+    },
+    {
+      "id": "R04",
+      "category": "relationship",
+      "question": "Which lab is led by the instructor of Ethics in AI, DS 307?",
+      "expected_answer": "Danish Pruthi leads the Natural Language Processing (NLP) Lab.",
+      "gold_groups": [
+        [
+          "0d0b11fdecd9dc02fb6da99e6c27a37e"
+        ],
+        [
+          "dca2d60eafe89bb059336980e31b82d9",
+          "d58de68a2ec9d4aac85ac5813df24cb6"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Pruthi",
+        "NLP|Natural\\s+Language\\s+Processing"
+      ]
+    },
+    {
+      "id": "R05",
+      "category": "relationship",
+      "question": "Which lab is led by the instructor of Numerical Optimization, DS 211?",
+      "expected_answer": "Deepak Subramani leads QUEST Lab.",
+      "gold_groups": [
+        [
+          "cdaa0c8078fa7c7412e0b4f046d3e44e",
+          "a54fe6ff4d2cd695e9641a358579fa06"
+        ],
+        [
+          "749aaf101d21f34d9bfc1f18c2a77b89"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Subramani",
+        "QUEST"
+      ]
+    },
+    {
+      "id": "R06",
+      "category": "relationship",
+      "question": "Which lab does the DS 393 instructor lead?",
+      "expected_answer": "Phani Motamarri leads MATRIX:Lab.",
+      "gold_groups": [
+        [
+          "dd9f0d04673770527cfb8828993c4354",
+          "61f2798df999379d12917e42bbf22261",
+          "386608033123befaf09fe7e81f822b62"
+        ],
+        [
+          "f59d002782ff463ea7601f03a975b0b2"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Motamarri",
+        "MATRIX"
+      ]
+    },
+    {
+      "id": "R07",
+      "category": "relationship",
+      "question": "Do DS 252 and DS 256 have the same instructor in the course catalogue, and who is it?",
+      "expected_answer": "Yes, Yogesh Simmhan.",
+      "gold_groups": [
+        [
+          "37a02650bf07f524de0d65e1268acaa1"
+        ],
+        [
+          "1fb930eb974e402f2a4208c28bcb5e4b"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Simmhan",
+        "yes|same|both"
+      ]
+    },
+    {
+      "id": "R08",
+      "category": "relationship",
+      "question": "Which labs are led by the two instructors who jointly taught DS 221 in Aug-Dec 2024?",
+      "expected_answer": "Sathish Vadhiyar leads MARS and Yogesh Simmhan leads DREAM:Lab.",
+      "gold_groups": [
+        [
+          "e02184fd1f7358beb78550c9dcbb6d4b"
+        ],
+        [
+          "ffc0f2139019dff402f16fad533844fe",
+          "f8713f81558b03f7aff4661a349ca200"
+        ],
+        [
+          "7d033c10bcb4a9e6af4b57d9c877f157",
+          "f8713f81558b03f7aff4661a349ca200"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Vadhiyar",
+        "Simmhan",
+        "MARS|Middleware\\s+and\\s+Runtime",
+        "DREAM"
+      ]
+    },
+    {
+      "id": "R09",
+      "category": "relationship",
+      "question": "Name the DS 252 instructor's lab and two research themes described for that lab in research admissions.",
+      "expected_answer": "Yogesh Simmhan, DREAM:Lab; distributed systems, scalable ML platforms and/or large-scale graph analytics.",
+      "gold_groups": [
+        [
+          "37a02650bf07f524de0d65e1268acaa1",
+          "d8facfafb828e04b2caa744cdd7fe120"
+        ],
+        [
+          "7d033c10bcb4a9e6af4b57d9c877f157"
+        ]
+      ],
+      "required_fact_patterns": [
+        "DREAM",
+        "distributed",
+        "scalable|graph\\s+analytics"
+      ]
+    },
+    {
+      "id": "R10",
+      "category": "relationship",
+      "question": "Which lab is led by the instructor of Numerical Linear Algebra, DS 284?",
+      "expected_answer": "Phani Motamarri leads MATRIX:Lab.",
+      "gold_groups": [
+        [
+          "9583a6a3c456a7e32b7eedf6141f2356",
+          "7c0c8641ef6e631b41f4f5628aadc3d8"
+        ],
+        [
+          "f59d002782ff463ea7601f03a975b0b2"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Motamarri",
+        "MATRIX"
+      ]
+    },
+    {
+      "id": "T01",
+      "category": "temporal",
+      "question": "Who taught DS 216 in the Jan-Apr 2026 term?",
+      "expected_answer": "Vaanathi Sundaresan.",
+      "gold_groups": [
+        [
+          "ed99d5c6be47b19990c32ed0e7dbc6e7"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Sundaresan"
+      ]
+    },
+    {
+      "id": "T02",
+      "category": "temporal",
+      "question": "Who jointly taught DS 221 in Aug-Dec 2024?",
+      "expected_answer": "Sathish Vadhiyar and Yogesh Simmhan.",
+      "gold_groups": [
+        [
+          "e02184fd1f7358beb78550c9dcbb6d4b"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Vadhiyar",
+        "Simmhan"
+      ]
+    },
+    {
+      "id": "T03",
+      "category": "temporal",
+      "question": "Who jointly teaches DS 221 in Aug-Dec 2026?",
+      "expected_answer": "Sathish Vadhiyar and Chirag Jain.",
+      "gold_groups": [
+        [
+          "badc40d536b31096e436b01c16495a7b"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Vadhiyar",
+        "Jain"
+      ]
+    },
+    {
+      "id": "T04",
+      "category": "temporal",
+      "question": "Where was DS 256 held in Jan-Apr 2026?",
+      "expected_answer": "CDS 202.",
+      "gold_groups": [
+        [
+          "5e85f9897d761b0ed318d44458b4f141"
+        ]
+      ],
+      "required_fact_patterns": [
+        "CDS\\s*202"
+      ]
+    },
+    {
+      "id": "T05",
+      "category": "temporal",
+      "question": "Who taught Ethics in AI in Aug-Dec 2025?",
+      "expected_answer": "Danish Pruthi.",
+      "gold_groups": [
+        [
+          "8c31ef53b60cab85d043e0650fd754dd"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Pruthi"
+      ]
+    },
+    {
+      "id": "T06",
+      "category": "temporal",
+      "question": "Who taught DS 211 in Jan-Apr 2025?",
+      "expected_answer": "Deepak Subramani.",
+      "gold_groups": [
+        [
+          "a54fe6ff4d2cd695e9641a358579fa06"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Subramani"
+      ]
+    },
+    {
+      "id": "T07",
+      "category": "temporal",
+      "question": "On what date was the first class of DS 252 in Aug-Dec 2026?",
+      "expected_answer": "11 August 2026.",
+      "gold_groups": [
+        [
+          "d8facfafb828e04b2caa744cdd7fe120"
+        ]
+      ],
+      "required_fact_patterns": [
+        "Aug(?:ust)?\\s*11|11\\s*(?:August|Aug)",
+        "2026"
+      ]
+    },
+    {
+      "id": "T08",
+      "category": "temporal",
+      "question": "What was the venue for DS 221 in Aug-Dec 2025?",
+      "expected_answer": "CDS 202.",
+      "gold_groups": [
+        [
+          "af50ec1799adfb8c42cd1282c1326a10"
+        ]
+      ],
+      "required_fact_patterns": [
+        "CDS\\s*202"
+      ]
+    },
+    {
+      "id": "U01",
+      "category": "unanswerable",
+      "question": "What is the monthly mess fee at the IISc hostels?",
+      "expected_answer": "Abstain: this frozen snapshot does not contain the requested information.",
+      "gold_groups": [],
+      "required_fact_patterns": []
+    },
+    {
+      "id": "U02",
+      "category": "unanswerable",
+      "question": "What is the minimum CGPA required to continue in the M.Tech programme?",
+      "expected_answer": "Abstain: this frozen snapshot does not contain the requested information.",
+      "gold_groups": [],
+      "required_fact_patterns": []
+    },
+    {
+      "id": "U03",
+      "category": "unanswerable",
+      "question": "What is the private mobile phone number of the DS 252 instructor?",
+      "expected_answer": "Abstain: this frozen snapshot does not contain the requested information.",
+      "gold_groups": [],
+      "required_fact_patterns": []
+    },
+    {
+      "id": "U04",
+      "category": "unanswerable",
+      "question": "Who will teach DS 252 in the Aug-Dec 2027 term?",
+      "expected_answer": "Abstain: this frozen snapshot does not contain the requested information.",
+      "gold_groups": [],
+      "required_fact_patterns": []
+    }
+  ]
+}

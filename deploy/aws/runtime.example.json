@@ -1,0 +1,28 @@
+{
+  "VLLM_URL": "https://openrouter.ai/api/v1",
+  "SERVED_MODEL": "xingchen-agi/xing4.0-29b-a4b:free",
+  "MODEL_API_KEY": "<MODEL_PROVIDER_API_KEY>",
+  "MODEL_REASONING": {
+    "enabled": false
+  },
+  "CHAT_TEMPLATE_KWARGS": {},
+  "MAX_MODEL_LEN": 4096,
+  "MAX_OUTPUT_TOKENS": 512,
+  "EMAIL_AUTH_ENABLED": true,
+  "AUTH_PROFESSOR_TEST_EMAILS": "",
+  "SMTP_HOST": "smtp-relay.brevo.com",
+  "SMTP_PORT": 587,
+  "SMTP_USERNAME": "<BREVO_SMTP_LOGIN>",
+  "SMTP_PASSWORD": "<BREVO_SMTP_KEY>",
+  "SMTP_FROM": "<VERIFIED_SENDER_EMAIL>",
+  "RATE_PER_MIN": 10,
+  "MODEL_PROVIDER_PREFERENCES": {
+    "data_collection": "deny",
+    "zdr": true,
+    "max_price": {
+      "prompt": 0,
+      "completion": 0,
+      "request": 0
+    }
+  }
+}

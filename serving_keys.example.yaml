@@ -1,0 +1,13 @@
+# Copy to serving_keys.yaml (keep it out of git) and replace the keys with long random strings, e.g.
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+# role -> what the key may see:
+#   guest   = public pages only
+#   student = public + student-only
+#   faculty = public + student-only + faculty-only
+#   admin   = everything (public, student, faculty, admin-only)
+# The tenant groups keys for per-tenant concurrency limits and the load test.
+keys:
+  REPLACE-with-a-random-key-applicants-0001: {tenant: applicants, role: guest}
+  REPLACE-with-a-random-key-students-00001: {tenant: students, role: student}
+  REPLACE-with-a-random-key-faculty-000001: {tenant: faculty, role: faculty}
+  REPLACE-with-a-random-key-admin-00000001: {tenant: office, role: admin}

@@ -1,0 +1,9 @@
+{
+  "VLLM_URL": "http://127.0.0.1:8000/v1",
+  "SERVED_MODEL": "mlx-community/Qwen3.5-9B-MLX-4bit",
+  "ASKIISC_DATA_DIR": "data/current",
+  "MAX_MODEL_LEN": 4096,
+  "MAX_OUTPUT_TOKENS": 512,
+  "EMAIL_AUTH_ENABLED": false,
+  "CHAT_TEMPLATE_KWARGS": {"enable_thinking": false}
+}
