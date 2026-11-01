@@ -24,5 +24,9 @@
       "completion": 0,
       "request": 0
     }
-  }
+  },
+  "GLOBAL_CONCURRENCY": 1,
+  "TENANT_CONCURRENCY": 1,
+  "TENANT_QUEUE": 4,
+  "QUEUE_WAIT_S": 120
 }

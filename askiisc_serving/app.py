@@ -386,7 +386,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         r_ok = await app.state.retrieval.ready()
         g_ok = await app.state.generator.ready()
         body = {"retrieval": r_ok, "model_endpoint": g_ok, "model": s.served_model,
-                "admission": app.state.admission.snapshot()}
+                "admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared"}
         return JSONResponse(body, status_code=200 if (r_ok and g_ok) else 503)
 
     @app.get("/metrics")

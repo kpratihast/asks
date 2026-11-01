@@ -21,8 +21,10 @@ def environment(release,config,state,domain):
         'FACULTY_DIRECTORY':str(release/'config/faculty_directory.json'),
         'HF_HOME':str(release/'assets/hf'),'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1',
         'TOKENIZERS_PARALLELISM':'false','OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1',
-        'GLOBAL_CONCURRENCY':'1','TENANT_CONCURRENCY':'1','TENANT_QUEUE':'4',
-        'QUEUE_WAIT_S':'120','GEN_TIMEOUT_S':'180','REGENERATE':'0',
+        'GLOBAL_CONCURRENCY':str(raw.get('GLOBAL_CONCURRENCY',1)),
+        'TENANT_CONCURRENCY':str(raw.get('TENANT_CONCURRENCY',1)),
+        'TENANT_QUEUE':str(raw.get('TENANT_QUEUE',4)),
+        'QUEUE_WAIT_S':str(raw.get('QUEUE_WAIT_S',120)),'GEN_TIMEOUT_S':'180','REGENERATE':'0',
         'FORWARDED_ALLOW_IPS':'127.0.0.1','PYTHONDONTWRITEBYTECODE':'1','TZ':'Asia/Kolkata'})
     return env
 

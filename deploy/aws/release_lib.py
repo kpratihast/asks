@@ -1,13 +1,13 @@
 """Portable release integrity, packaging and deployment validation (standard library only)."""
 from __future__ import annotations
-import hashlib,json,re,sqlite3,tarfile
+import hashlib,json,math,re,sqlite3,tarfile
 from pathlib import Path,PurePosixPath
 from urllib.parse import urlsplit
 
 MODEL='BAAI/bge-small-en-v1.5'
 CONFIG_KEYS={'VLLM_URL','SERVED_MODEL','MODEL_API_KEY','MODEL_REASONING','MODEL_PROVIDER_PREFERENCES','CHAT_TEMPLATE_KWARGS',
              'MAX_MODEL_LEN','MAX_OUTPUT_TOKENS','EMAIL_AUTH_ENABLED','AUTH_PROFESSOR_TEST_EMAILS',
-             'SMTP_HOST','SMTP_PORT','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM','RATE_PER_MIN'}
+             'SMTP_HOST','SMTP_PORT','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM','RATE_PER_MIN','GLOBAL_CONCURRENCY','TENANT_CONCURRENCY','TENANT_QUEUE','QUEUE_WAIT_S'}
 
 def sha(path):
     h=hashlib.sha256()
@@ -38,7 +38,16 @@ def runtime_config(raw):
     if out['EMAIL_AUTH_ENABLED'] and any(not out.get(k) for k in ['SMTP_HOST','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM']):
         raise ValueError('Email authentication requires the SMTP host, username, password and sender')
     if int(out['MAX_MODEL_LEN'])<=int(out['MAX_OUTPUT_TOKENS'])+128:raise ValueError('Context must exceed output and safety budget')
-    if not 1<=int(out['RATE_PER_MIN'])<=100:raise ValueError('RATE_PER_MIN must be 1–100')
+    for name,low,high in [('RATE_PER_MIN',1,100),('GLOBAL_CONCURRENCY',1,32),('TENANT_CONCURRENCY',1,32),('TENANT_QUEUE',0,100)]:
+        if name not in out:continue
+        value=out[name]
+        if isinstance(value,bool) or not isinstance(value,(int,str)) or not re.fullmatch(r'[0-9]+',str(value)) or not low<=int(value)<=high:
+            raise ValueError(f'{name} must be an integer from {low} to {high}')
+    if 'QUEUE_WAIT_S' in out:
+        try:value=float(out['QUEUE_WAIT_S'])
+        except (ValueError,TypeError):raise ValueError('QUEUE_WAIT_S must be a finite number from 1 to 300') from None
+        if isinstance(out['QUEUE_WAIT_S'],bool) or not math.isfinite(value) or not 1<=value<=300:
+            raise ValueError('QUEUE_WAIT_S must be a finite number from 1 to 300')
     for v in out.values():
         if isinstance(v,str) and ('\x00' in v or '\n' in v or '\r' in v):raise ValueError('Config strings must be single-line values')
     return out

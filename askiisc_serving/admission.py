@@ -1,19 +1,16 @@
-"""Admission control and load shedding (FR-7, NFR-9).
+"""Per-key token buckets and bounded queues sharing one process-wide capacity limit.
 
-Three checks, cheapest first; any failure is an immediate HTTP 429 with Retry-After:
-  1. per-key rate limit      token bucket, RATE_PER_MIN requests per minute per API key
-  2. per-tenant concurrency  at most C requests in flight per tenant; up to Q more may wait
-                             QUEUE_WAIT_S for a slot, the rest are rejected at once (bounded queue)
-  3. global concurrency      at most GLOBAL_CONCURRENCY in flight in this process
-An admitted request keeps its slot until its response (including a stream) has finished, so admitted
-requests are never cut off by later arrivals.
+Requests wait in a FIFO queue for their tenant when either concurrency limit is full.
+A single condition protects both limits, including the check after a waiter wakes.
+Admitted requests keep their slot until the complete response/stream finishes.
 """
 from __future__ import annotations
 
 import asyncio
 import math
 import time
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 
 
 class Rejected(Exception):
@@ -41,26 +38,31 @@ class TokenBucket:
 @dataclass
 class _Tenant:
     active: int = 0
-    waiting: int = 0
-    cond: asyncio.Condition | None = None
+    tickets: deque = field(default_factory=deque)
+
+    @property
+    def waiting(self):
+        return len(self.tickets)
 
 
 class Admission:
     def __init__(self, rate_per_min: int, tenant_concurrency: int, tenant_queue: int, queue_wait_s: float,
                  global_concurrency: int, clock=time.monotonic):
+        if any(isinstance(v, bool) or not isinstance(v, int) or v < 1 for v in
+               [rate_per_min, tenant_concurrency, global_concurrency]):
+            raise ValueError('Rate and concurrency limits must be positive integers')
+        if isinstance(tenant_queue, bool) or not isinstance(tenant_queue, int) or tenant_queue < 0:
+            raise ValueError('Tenant queue must be a nonnegative integer')
+        if isinstance(queue_wait_s, bool) or not isinstance(queue_wait_s,(int,float)) or not math.isfinite(queue_wait_s) or queue_wait_s <= 0:
+            raise ValueError('Queue wait must be a positive finite number')
         self.rate, self.c, self.q, self.wait = rate_per_min, tenant_concurrency, tenant_queue, queue_wait_s
         self.global_limit, self.clock = global_concurrency, clock
         self.buckets: dict[str, TokenBucket] = {}
         self.tenants: dict[str, _Tenant] = {}
+        self.changed = asyncio.Condition()
         self.global_active = 0
         self.stats = {"admitted": 0, "rejected_rate": 0, "rejected_queue_full": 0, "rejected_queue_timeout": 0,
                       "rejected_global": 0}
-
-    def _tenant(self, name: str) -> _Tenant:
-        t = self.tenants.get(name)
-        if t is None:
-            t = self.tenants[name] = _Tenant(cond=asyncio.Condition())
-        return t
 
     async def acquire(self, key_id: str, tenant: str) -> "Slot":
         b = self.buckets.setdefault(key_id, TokenBucket(self.rate, self.clock))
@@ -68,30 +70,38 @@ class Admission:
         if wait:
             self.stats["rejected_rate"] += 1
             raise Rejected("rate_limited", wait)
-        if self.global_active >= self.global_limit:
-            self.stats["rejected_global"] += 1
-            raise Rejected("server_busy", 2)
-        t = self._tenant(tenant)
-        async with t.cond:
-            if t.active >= self.c:
+        async with self.changed:
+            t = self.tenants.setdefault(tenant, _Tenant())
+            if t.active >= self.c or self.global_active >= self.global_limit or t.waiting:
                 if t.waiting >= self.q:
+                    if self.q == 0 and self.global_active >= self.global_limit:
+                        self.stats["rejected_global"] += 1
+                        raise Rejected("server_busy", 2)
                     self.stats["rejected_queue_full"] += 1
                     raise Rejected("tenant_queue_full", 2)
-                t.waiting += 1
+                ticket = object()
+                t.tickets.append(ticket)
                 try:
-                    await asyncio.wait_for(t.cond.wait_for(lambda: t.active < self.c), self.wait)
+                    await asyncio.wait_for(self.changed.wait_for(
+                        lambda: t.tickets[0] is ticket and t.active < self.c and self.global_active < self.global_limit
+                    ), self.wait)
                 except asyncio.TimeoutError:
                     self.stats["rejected_queue_timeout"] += 1
                     raise Rejected("queue_timeout", 2)
                 finally:
-                    t.waiting -= 1
+                    # Timeouts and disconnected/cancelled clients must not strand queue entries.
+                    t.tickets.remove(ticket)
+                    self.changed.notify_all()
             t.active += 1
-        self.global_active += 1
-        self.stats["admitted"] += 1
-        return Slot(self, t)
+            self.global_active += 1
+            self.stats["admitted"] += 1
+            return Slot(self, t)
 
     def snapshot(self) -> dict:
         return {"global_active": self.global_active, **self.stats,
+                "limits": {"rate_per_min": self.rate, "tenant_concurrency": self.c,
+                           "tenant_queue": self.q, "queue_wait_s": self.wait,
+                           "global_concurrency": self.global_limit},
                 "tenants": {k: {"active": v.active, "waiting": v.waiting} for k, v in self.tenants.items()}}
 
 
@@ -100,10 +110,10 @@ class Slot:
         self.adm, self.t, self.released = adm, t, False
 
     async def release(self):
-        if self.released:
-            return
-        self.released = True
-        self.adm.global_active -= 1
-        async with self.t.cond:
+        async with self.adm.changed:
+            if self.released:
+                return
+            self.released = True
+            self.adm.global_active -= 1
             self.t.active -= 1
-            self.t.cond.notify()
+            self.adm.changed.notify_all()

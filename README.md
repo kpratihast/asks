@@ -171,3 +171,5 @@ Check new pages with `ingest` output and `diagnose` BEFORE running the test, nev
 The chat supports IISc email OTP login for students and CDS professors. Public documents need no login. Student and faculty attachments are classified during ingestion and filtered before vector retrieval, graph expansion, prompts, citations, and file downloads. See [EMAIL_ACCESS.md](EMAIL_ACCESS.md) for email setup, document imports, access rules, and validation.
 
 Automatic AWS deployments from GitHub: see [GITHUB_DEPLOYMENT.md](deploy/aws/GITHUB_DEPLOYMENT.md).
+
+Load-control diagnosis, effective AWS limits and a reproducible C=20 / Q=10 check: [LOAD_TESTING.md](LOAD_TESTING.md).
