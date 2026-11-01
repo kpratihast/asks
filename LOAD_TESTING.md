@@ -5,7 +5,7 @@ The public AWS endpoint is https://13.203.0.141/v1/ask. Its live settings use th
 The load-test observations have three causes:
 
 - The AWS launcher sets **global concurrency = 1**, **tenant concurrency = 1**, **tenant queue = 4**, and **queue wait = 120 s** unless explicitly configured otherwise. Changing the serving package's default C=20 / Q=10 alone does not change AWS.
-- All anonymous browsers use the same `public-browser` rate bucket and `public` tenant. Requests from a phone and laptop share that budget. A token bucket of R requests/minute starts with R tokens and refills one token every 60/R seconds; rejection attempts also consume any available token. A refill of one every five seconds is consistent with R=12. Concurrent traffic and timing affect an observed burst count, so inspect the effective configuration to confirm R.
+- All anonymous browsers use the same `public-browser` rate bucket and `public` tenant. Requests from a phone and laptop share that budget. A token bucket of R requests/minute starts with R tokens and refills one token every 60/R seconds; rejection attempts also consume any available token. A refill of one every five seconds is consistent with R=12. Concurrent traffic and timing affect an observed burst count. Inspection of the deployed runtime confirmed **R=10/minute**, refilling one token every six seconds; the approximate 12-request observation is not the configured limit.
 - The earlier admission controller checked the global cap before entering the tenant queue. With global=1, the second request immediately returned `429/server_busy`; the configured queue was never reached. It also failed to recheck the global cap after a queued request woke, which could exceed the global cap across tenants.
 
 The deployed `/readyz` counters captured during diagnosis were 304 admitted, 3,605 rate-limited, 31 globally rejected, and zero queue-full/queue-timeout rejections. Those counters describe that process at the time of capture; they are not a complete latency or throughput benchmark.
@@ -69,3 +69,9 @@ The probe holds synthetic slots and makes **zero model calls**. In a matched bef
 | C=20, global=20, Q=10, 31 attempts, R=12/min | 12 completed, 19 rate-limited | 12 completed, 19 rate-limited |
 
 The HTTP regression test also runs 31 simultaneous requests through the actual FastAPI `/v1/ask` route with fake retrieval/model responses: 20 hold active slots, 10 wait, one receives HTTP 429, and the remaining 30 return cited answers after the fake model is released. These results verify queue policy and HTTP integration. They do not measure production LLM latency, AWS throughput, or a live 20-way model workload.
+
+## Live AWS verification — 1 November 2026
+
+Release `aws-20261101-admission-r10` was deployed with the exact previous runtime configuration preserved: R=10/min shared by anonymous clients, global=1, C=1, Q=4, queue wait=120 s, and the same OpenRouter model/authentication settings.
+
+A six-request simultaneous burst produced **five HTTP 200 cited answers and one HTTP 429 `tenant_queue_full`**, with observed peaks of one active and four waiting. The first answer arrived in 1.92 s and the last in 12.12 s; the rejected request returned in about 95 ms with `Retry-After: 2`. The queue drained to zero. Protected answers and the private PDF remained inaccessible without sign-in. This was a live C=1 / Q=4 test; C=20 / Q=10 was verified separately through the offline HTTP regression test, not enabled on the live app.
