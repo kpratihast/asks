@@ -22,7 +22,7 @@ used only if the payload lacks it, so the adapter keeps working, and gets better
   title            first markdown heading of the document's chunk 0 / of the chunk, else the URL
   section_heading  payload `page_or_section`, else the first markdown heading in the chunk
   doc_type         URL rules (crawl.TYPE_RULES + /faculty/ = people)
-  access_scope     "public" (ingestion has no scopes yet)
+  access_scope     "unclassified" (excluded until explicitly classified by ingestion)
   course_codes     codes found in heading + text
   academic_term    None (cannot be derived reliably from a 300-500 word window)
   embedding_model  Postgres document_chunks.embedding_model, else BAAI/bge-m3
@@ -219,7 +219,7 @@ class IngestionQdrantStore:
             title=pl.get("title") or titles.get(pl.get("version_id", ""), _title_from_url(url)),
             section_heading=heading,
             text=text,
-            access_scope=pl.get("access_scope") or "public",
+            access_scope=pl.get("access_scope") or "unclassified",
             doc_type=pl.get("doc_type") or doc_type_from_url(url),
             department=pl.get("department") or "",
             academic_term=pl.get("academic_term"),

@@ -47,7 +47,7 @@ def test_upstream_rate_limit_returns_excerpt_fallback_and_redacts_key():
     with client:
         result = ask(client).json()
     assert result['status'] == 'fallback' and result['excerpts']
-    assert '429' in json.dumps(result) and SECRET not in json.dumps(result)
+    assert result['detail'] == 'The model is temporarily unavailable.' and SECRET not in json.dumps(result)
 
 
 @pytest.mark.parametrize('event', [

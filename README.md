@@ -173,3 +173,5 @@ The chat supports IISc email OTP login for students and CDS professors. Public d
 Automatic AWS deployments from GitHub: see [GITHUB_DEPLOYMENT.md](deploy/aws/GITHUB_DEPLOYMENT.md).
 
 Load-control diagnosis, effective AWS limits and a reproducible C=20 / Q=10 check: [LOAD_TESTING.md](LOAD_TESTING.md).
+
+Private document imports: [single-command student/professor ingestion](DOCUMENT_INGESTION.md). Security controls and assessment limitations: [security review](SECURITY_REVIEW.md).

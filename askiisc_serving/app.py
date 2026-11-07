@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 
 from .admission import Admission, Rejected
@@ -34,6 +35,7 @@ from .conversation import HELP_REPLY, guidance_reason, context_question, valid_r
 from .metrics import Metrics
 from .retrieval_client import MODES, RetrievalUnavailable, SnapshotMismatch
 from .settings import Settings
+from .security import RequestGuard, instruction_attack, audit_evidence
 
 
 class OTPRequest(BaseModel):
@@ -54,8 +56,8 @@ class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     programme: str | None = Field(default=None, max_length=64)
     academic_year: str | None = Field(default=None, pattern=r"^\d{4}-\d{4}$")
-    mode: str = "full"                      # full | vector (baseline B2) | none (baseline B0)
-    pinned_snapshot: str | None = None      # benchmarks: refuse to answer from a different corpus
+    mode: str = Field(default="full", max_length=16)
+    pinned_snapshot: str | None = Field(default=None, max_length=128)
     history: list[ChatTurn] = Field(default_factory=list, max_length=6)
     stream: bool = False
 
@@ -109,7 +111,11 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                 else:
                     st.retrieval.r.store.close()
 
-    app = FastAPI(title="Ask IISc serving", version="1.0", lifespan=lifespan)
+    public = s.public_chat or not s.email_auth_enabled
+    app = FastAPI(title="Ask IISc serving", version="1.0", lifespan=lifespan,
+                  docs_url=None if public else '/docs', redoc_url=None if public else '/redoc',
+                  openapi_url=None if public else '/openapi.json')
+    app.add_middleware(RequestGuard)
     app.state.settings, app.state.keys, app.state.retrieval, app.state.generator = s, keys, retrieval, generator
     app.state.admission = Admission(s.rate_per_min, s.tenant_concurrency, s.tenant_queue, s.queue_wait_s,
                                     s.global_concurrency)
@@ -117,28 +123,17 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     app.state.email_auth = (email_auth or EmailAuth()) if s.email_auth_enabled else None
     app.state.documents = document_catalog or DocumentCatalog()
 
-    @app.middleware("http")
-    async def browser_security(request: Request, call_next):
-        # HttpOnly SameSite cookies plus explicit origin checks on state-changing requests.
-        if request.method == "POST":
-            origin = request.headers.get("origin")
-            expected = os.environ.get("AUTH_PUBLIC_ORIGIN", str(request.base_url).rstrip("/"))
-            if origin and origin != expected:
-                return _error(403, "Cross-origin requests are not allowed")
-        response = await call_next(request)
-        if request.url.path.startswith(("/v1/", "/auth/")):
-            response.headers["Cache-Control"] = "private, no-store"
-            response.headers["Vary"] = "Cookie, Authorization"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "same-origin"
-        return response
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        # Pydantic's default response echoes input, including malformed OTPs/history.
+        return _error(422, 'Invalid request. Check the field types and length limits.')
 
-    def principal(authorization, request):
+    async def principal(authorization, request):
         if not s.email_auth_enabled:
             # Disabling identity never exposes restricted sources or accepts privileged keys.
             return Principal("public-browser", "public", "guest")
         if not authorization:
-            session = app.state.email_auth.lookup(request.cookies.get(COOKIE))
+            session = await asyncio.to_thread(app.state.email_auth.lookup, request.cookies.get(COOKIE))
             if session is not None:
                 return session
         if s.public_chat and not authorization:
@@ -191,7 +186,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
 
     @app.get("/auth/me")
     async def me(request: Request):
-        p = app.state.email_auth.lookup(request.cookies.get(COOKIE)) if s.email_auth_enabled else None
+        p = await asyncio.to_thread(app.state.email_auth.lookup, request.cookies.get(COOKIE)) if s.email_auth_enabled else None
         return app.state.email_auth.identity(p.email) if p else {
             "authenticated": False, "email": None, "role": "guest", "display_role": "General user"}
 
@@ -222,7 +217,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
 
     @app.get("/v1/documents/{document_id}")
     async def document(document_id: str, request: Request, authorization: str | None = Header(default=None)):
-        p = principal(authorization, request)
+        p = await principal(authorization, request)
         doc = app.state.documents.find(document_id)
         if doc is None:
             raise HTTPException(404, "No such document")
@@ -235,13 +230,13 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         path = app.state.documents.path(doc)
         if not path.is_file():
             raise HTTPException(404, "Document unavailable")
-        return FileResponse(path, filename=path.name, content_disposition_type="inline")
+        return FileResponse(path, filename=path.name, content_disposition_type="attachment")
 
     # ------------------------------------------------------------------ /v1/ask
     @app.post("/v1/ask")
     async def ask(q: AskIn, request: Request, authorization: str | None = Header(default=None)):
         t0 = time.perf_counter()
-        p = principal(authorization, request)
+        p = await principal(authorization, request)
         if p is None:
             return _error(401, "missing or invalid API key")
         if q.mode not in MODES:
@@ -266,7 +261,9 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         scope = Scope(p.scopes, q.programme, q.academic_year)
         rec = {"tenant": p.tenant, "role": p.role, "mode": q.mode, "stream": q.stream, "model": s.served_model}
 
-        route_reason = guidance_reason(q.question) if q.mode != "none" else None
+        untrusted = '\n'.join([q.question, previous_question or '', q.programme or ''])
+        route_reason = ('unsafe_instruction' if instruction_attack(untrusted) else
+                        guidance_reason(q.question)) if q.mode != "none" else None
         if route_reason:
             payload = {"status": "guidance", "reason": route_reason, "answer": HELP_REPLY,
                        "citations": [], "reset_conversation": True,
@@ -308,12 +305,16 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         except RetrievalUnavailable as e:
             await slot.release()
             app.state.metrics.reject(503, "retrieval_unavailable", p.tenant)
-            return _error(503, f"retrieval unavailable: {e}", retry_after_s=5)
+            return _error(503, "Retrieval is temporarily unavailable. Please try again later.", retry_after_s=5)
         except BaseException:
             await slot.release()
             raise
         # Last boundary check before prompts, excerpts, citations or SSE metadata.
-        hits = [h for h in hits if h.get("access_scope", "public") in p.scopes]
+        hits, trace = audit_evidence(hits, trace, p.scopes, app.state.documents)
+        if any(instruction_attack(h.get('text','')) or instruction_attack(h.get('title','')) for h in hits):
+            # Contaminated evidence must not be used by prompts, excerpts, traces or citations.
+            hits, trace = [], {'mode': q.mode, 'evidence_sufficient': False, 'degraded': True,
+                              'degraded_reason': 'unsafe_source_instructions', 'timings_ms': {}}
         retrieval_ms = round((time.perf_counter() - t0) * 1000 - queue_ms, 1)
         timings = {"queue_ms": queue_ms, "retrieval_ms": retrieval_ms}
 
@@ -369,11 +370,16 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     # ------------------------------------------------------------------ other endpoints
     @app.get("/v1/sources/{chunk_id}")
     async def source(chunk_id: str, request: Request, authorization: str | None = Header(default=None)):
-        p = principal(authorization, request)
+        p = await principal(authorization, request)
         if p is None:
             return _error(401, "missing or invalid API key")
-        src = app.state.retrieval.source(chunk_id, p.scopes)
-        if src is None:
+        if len(chunk_id)>128:
+            raise HTTPException(404, "No such source")
+        src = await asyncio.to_thread(app.state.retrieval.source, chunk_id, p.scopes)
+        if src is None or src.get('access_scope') not in p.scopes:
+            raise HTTPException(404, "no such source in the active snapshot for your access level")
+        visible, _ = audit_evidence([src], {}, p.scopes, app.state.documents)
+        if not visible:
             raise HTTPException(404, "no such source in the active snapshot for your access level")
         return src
 
@@ -381,16 +387,29 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     async def healthz():
         return {"status": "ok"}
 
+    ready_lock = asyncio.Lock()
+    ready_cache = {'until': 0, 'retrieval': False, 'model': False}
+
     @app.get("/readyz")
     async def readyz():
-        r_ok = await app.state.retrieval.ready()
-        g_ok = await app.state.generator.ready()
+        async with ready_lock:
+            if time.monotonic() >= ready_cache['until']:
+                try:
+                    async with asyncio.timeout(6):
+                        r_ok, g_ok = await asyncio.gather(app.state.retrieval.ready(), app.state.generator.ready())
+                except Exception:
+                    r_ok = g_ok = False
+                ready_cache.update(until=time.monotonic()+5, retrieval=r_ok, model=g_ok)
+        r_ok, g_ok = ready_cache['retrieval'], ready_cache['model']
         body = {"retrieval": r_ok, "model_endpoint": g_ok, "model": s.served_model,
                 "admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared"}
         return JSONResponse(body, status_code=200 if (r_ok and g_ok) else 503)
 
     @app.get("/metrics")
-    async def metrics():
+    async def metrics(request: Request, authorization: str | None = Header(default=None)):
+        p = await principal(authorization, request)
+        if p is None or (public and p.role not in {'admin','staff'}):
+            raise HTTPException(404, 'Not found')
         return PlainTextResponse(app.state.metrics.prometheus(app.state.admission.snapshot()))
 
     return app
@@ -403,7 +422,7 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish) -> 
     try:
         answer, meta = await gen.complete(messages)
     except GenerationUnavailable as e:
-        return finish({"status": "fallback", "reason": "generation_unavailable", "detail": str(e), "answer": None,
+        return finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.", "answer": None,
                        "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
     attempts = 1
     check = verify_connected(answer, selected) if q.mode == "full" else verify(answer, len(selected))
@@ -418,7 +437,7 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish) -> 
             attempts = 2
             check = verify_connected(answer, selected) if q.mode == "full" else verify(answer, len(selected))
         except GenerationUnavailable as e:
-            return finish({"status": "fallback", "reason": "generation_unavailable", "detail": str(e),
+            return finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.",
                            "answer": None, "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
     timings.update({k: meta.get(k) for k in ("ttft_ms", "generation_ms")})
     base = {"usage": meta.get("usage"), "budget": budget, "attempts": attempts, "verification": check}
@@ -463,10 +482,11 @@ def _sse_single(payload: dict):
 
 
 async def _stream(app, q, messages, selected, budget, hits, trace, timings, finish, slot):
-    """SSE: `meta` (citation metadata, so the client can resolve [S#] as they appear), then `token`
-    events, then `done` with the checked result. If the finished answer fails the citation check, `done`
-    has status "fallback" with source excerpts, and the client must replace the streamed text with them
-    (no unsupported claim is left standing, FR-11). Streaming does not regenerate."""
+    """SSE metadata first; answer tokens are released only after citation validation.
+
+    Removing a draft in the UI cannot retract bytes already sent to an attacker.
+    The bounded model completion is therefore buffered server-side. No regeneration.
+    """
     parts, meta = [], {}
     try:
         yield _sse("meta", {"citations": citations_for(selected), "budget": budget,
@@ -475,11 +495,10 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
             async for kind, v in app.state.generator.stream(messages):
                 if kind == "token":
                     parts.append(v)
-                    yield _sse("token", {"t": v})
                 else:
                     meta = v
         except GenerationUnavailable as e:
-            yield _sse("done", finish({"status": "fallback", "reason": "generation_unavailable", "detail": str(e),
+            yield _sse("done", finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.",
                                        "answer": None, "excerpts": excerpt_fallback(hits), "citations": [],
                                        "budget": budget, "replace_streamed_text": True}))
             return
@@ -499,6 +518,9 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
         else:
             payload = {"status": "answered", "answer": answer, "citations": citations_for(selected, check["used"]),
                        "grounded": True, **base}
+        if payload['status'] == 'answered':
+            for word in answer.split(' '):
+                yield _sse('token', {'t': word+' '})
         yield _sse("done", finish(payload))
     finally:
         await slot.release()

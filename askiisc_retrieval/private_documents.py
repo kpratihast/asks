@@ -46,7 +46,7 @@ class DocumentCatalog:
         years = set(re.findall(r'\b20\d{2}\b', question))
         return [d for d in self.documents
                 if not (entrance and d.get('query_topic') in ('course_schedule', 'course_examination'))
-                and (not years or d.get('academic_term', '')[:4] in years)
+                and (not years or not d.get('academic_term') or d['academic_term'][:4] in years)
                 and any(re.search(p, question, re.I) for p in d.get('gate_patterns', []))]
 
     def denied_scopes(self, question, allowed):
@@ -75,10 +75,17 @@ def pdf_to_html(path: Path, title: str, term: str):
     from pypdf import PdfReader
     blocks = []
     layout_pages = []
-    for n, page in enumerate(PdfReader(path).pages, 1):
+    reader = PdfReader(path)
+    if len(reader.pages) > 200:
+        raise ValueError('Split PDFs longer than 200 pages into logical sections before import')
+    total_chars = 0
+    for n, page in enumerate(reader.pages, 1):
         text = page.extract_text(extraction_mode='layout') or ''
         if len(text.strip()) < 40:
             raise ValueError(f'Page {n} needs OCR and manual review before ingestion')
+        total_chars += len(text)
+        if total_chars > 2 * 1024 * 1024:
+            raise ValueError('PDF text exceeds the import budget; split it into logical sections')
         layout_pages.append(text)
         # Keep layout rows separate: each timetable row retains its own date and session.
         for line in text.splitlines():

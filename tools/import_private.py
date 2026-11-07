@@ -40,8 +40,9 @@ def main():
               if json.loads(line)['source_url'] not in {'/v1/documents/' + d['id'] for d in DocumentCatalog().documents}]
     target.mkdir(parents=True, mode=0o700)
     clone_index(base / 'qdrant', target / 'qdrant')
-    if (base / 'raw').exists():
-        shutil.copytree(base / 'raw', target / 'raw')
+    for cache in ['raw', 'admissions']:
+        if (base / cache).exists():
+            shutil.copytree(base / cache, target / cache)
     emb = make_embedder()
     if emb.model_id != old.embedding_model:
         raise SystemExit('The embedder must match the existing public index.')
@@ -52,7 +53,7 @@ def main():
         all_chunks = public + private
         active = frozenset(c.version_id for c in all_chunks if c.version_id in old.active_version_ids or c in private)
         graph = JsonGraphStore(build_edges(all_chunks)); graph.save(target / 'graph.json')
-        snapshot = Snapshot('snap-' + h('|'.join(sorted(active)) + emb.model_id,10), emb.model_id,
+        snapshot = Snapshot('snap-' + h('|'.join(sorted(active)) + emb.model_id + GRAPH_RULES_VERSION,10), emb.model_id,
                             GRAPH_RULES_VERSION, active)
         JsonSnapshotProvider.write(target / 'snapshot.json', snapshot)
         (target / 'chunks.jsonl').write_text(''.join(json.dumps(c.to_dict(),ensure_ascii=False)+'\n' for c in all_chunks))

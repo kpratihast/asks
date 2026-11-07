@@ -46,6 +46,9 @@ class AuthConfig:
     session_ttl: int = 8 * 3600
     cooldown: int = 60
     max_attempts: int = 5
+    # Global persistent limits protect SMTP quota against distributed requests.
+    max_sends_hour: int = 50
+    max_sends_day: int = 200
     secure_cookie: bool = field(default_factory=lambda: os.environ.get('AUTH_COOKIE_SECURE', '1') == '1')
     smtp_host: str = field(default_factory=lambda: os.environ.get('SMTP_HOST', ''))
     smtp_port: int = field(default_factory=lambda: int(os.environ.get('SMTP_PORT', '587')))
@@ -126,7 +129,7 @@ class EmailAuth:
             raise AuthError(503, 'Email sign-in is awaiting sender configuration. Public information is available without login.')
         with self._db() as c:
             c.execute('BEGIN IMMEDIATE')
-            c.execute('DELETE FROM sends WHERE at < ?', (now - 3600,))
+            c.execute('DELETE FROM sends WHERE at < ?', (now - 86400,))
             c.execute('DELETE FROM challenges WHERE expires < ?', (now,))
             c.execute('DELETE FROM sessions WHERE expires < ?', (now,))
             last = c.execute('SELECT MAX(at) FROM sends WHERE email=?', (email,)).fetchone()[0]
@@ -134,7 +137,9 @@ class EmailAuth:
                 raise AuthError(429, 'Please wait before requesting another code.', max(1, int(self.s.cooldown - (now-last))))
             per_email = c.execute('SELECT COUNT(*) FROM sends WHERE email=? AND at>?', (email, now - 3600)).fetchone()[0]
             per_ip = c.execute('SELECT COUNT(*) FROM sends WHERE ip=? AND at>?', (ip, now - 3600)).fetchone()[0]
-            if per_email >= 5 or per_ip >= 20:
+            hourly = c.execute('SELECT COUNT(*) FROM sends WHERE at>?', (now - 3600,)).fetchone()[0]
+            daily = c.execute('SELECT COUNT(*) FROM sends WHERE at>?', (now - 86400,)).fetchone()[0]
+            if per_email >= 5 or per_ip >= 20 or hourly >= self.s.max_sends_hour or daily >= self.s.max_sends_day:
                 raise AuthError(429, 'Too many code requests. Try again later.', 3600)
             challenge, code = secrets.token_urlsafe(24), f'{secrets.randbelow(1000000):06d}'
             c.execute('INSERT OR REPLACE INTO challenges(id,email,digest,expires,attempts) VALUES (?,?,?,?,0)',

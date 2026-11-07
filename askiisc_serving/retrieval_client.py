@@ -71,7 +71,7 @@ def hits_from_result(d: dict, now_term: str | None = None) -> list[dict]:
             status = "current"
         m = INSTRUCTOR_RE.search(text)
         hits.append({
-            "access_scope": c.get("access_scope", "public"),
+            "access_scope": c.get("access_scope"),
             "marker": c["marker"], "title": c.get("title", ""), "section": c.get("section_heading", ""),
             "url": c.get("source_url", ""), "version_id": c.get("version_id"), "chunk_ids": c.get("chunk_ids", []),
             "academic_term": term, "academic_year": academic_year(term) or "not term-specific",
@@ -135,7 +135,7 @@ class LocalRetrieval:
             if c.version_id in snap.active_version_ids and c.access_scope in scopes:
                 return {"chunk_id": c.chunk_id, "title": c.title, "section": c.section_heading,
                         "url": c.source_url, "version_id": c.version_id, "academic_term": c.academic_term,
-                        "text": c.text}
+                        "text": c.text, "access_scope": c.access_scope}
         return None
 
     async def ready(self) -> bool:
@@ -171,6 +171,12 @@ class RemoteRetrieval:
         d = r.json()
         if any("access_scope" not in c for c in d.get("citations", [])):
             raise RetrievalUnavailable("Remote retrieval must supply access_scope on every citation")
+        citations = {c['marker']: c for c in d.get('citations', [])}
+        for passage in d.get('passages', []):
+            citation = citations.get(passage.get('marker'))
+            if (citation is None or passage.get('access_scope') != citation['access_scope']
+                    or passage.get('chunk_id') not in citation.get('chunk_ids', [])):
+                raise RetrievalUnavailable('Remote passage provenance does not match its citation')
         if pinned and d.get("snapshot_id") != pinned:
             raise SnapshotMismatch(f"pinned snapshot {pinned} is not active (active: {d.get('snapshot_id')})")
         return [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes], _trace(d, mode)

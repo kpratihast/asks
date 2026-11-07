@@ -36,6 +36,7 @@ import logging
 import re
 import time
 from collections import Counter
+from .contract import SCOPES
 from typing import Callable
 
 from .graph_rules import person
@@ -97,6 +98,9 @@ def edges_from_records(records: list[dict]) -> tuple[list[Edge], dict[str, list[
     skipped: Counter = Counter()
     for r in records:
         la, pa, lb, pb, pr = r["la"], r["pa"] or {}, r["lb"], r["pb"] or {}, r["pr"] or {}
+        if pr.get("access_scope") not in SCOPES:
+            skipped["missing or invalid access_scope"] += 1
+            continue
         srcs, dsts = _keys(la, pa), _keys(lb, pb)
         for labels, props, keys in ((la, pa, srcs), (lb, pb, dsts)):
             if set(labels) & PERSON_LABELS:
@@ -118,7 +122,7 @@ def edges_from_records(records: list[dict]) -> tuple[list[Edge], dict[str, list[
             for dst, _ in dsts:
                 if src != dst:
                     edges.append(Edge(src, REL_MAP.get(r["t"], r["t"]), dst, chunks, str(pr["version_id"]),
-                                      str(pr.get("access_scope") or "public"), term))
+                                      pr["access_scope"], term))
     return edges, aliases, skipped
 
 

@@ -161,14 +161,14 @@ def create_app(retriever=None, service_key=None):
         if bad:
             raise HTTPException(422, f"unknown scopes {bad}; allowed {list(SCOPES)}")
         if set(body.scopes) - {"public"}:
-            if not service_key or not hmac.compare_digest(authorization or "", "Bearer " + service_key):
+            if not service_key or not hmac.compare_digest((authorization or "").encode("utf-8"), ("Bearer " + service_key).encode("utf-8")):
                 raise HTTPException(403, "Restricted retrieval requires the gateway service credential")
         t = time.perf_counter()
         try:
             res = r().retrieve(body.question, body.scopes, use_graph=body.use_graph, use_rerank=body.use_rerank)
         except Exception as e:                  # stores down: say so, never a partial silent answer
             log.exception("retrieve failed")
-            raise HTTPException(503, f"retrieval unavailable: {type(e).__name__}: {e}")
+            raise HTTPException(503, "Retrieval is temporarily unavailable")
         out = result_to_dict(res, include_text=body.include_text)
         out["context"] = format_context(res, body.context_chars)
         out["sources_text"] = render_sources(res)

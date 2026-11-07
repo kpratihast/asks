@@ -35,3 +35,6 @@ __pycache__/
 # Historical evaluation notes can reproduce restricted source material.
 CONNECTED_QUESTIONS.md
 EMAIL_ACCESS.md
+
+# Interrupted operator import candidates (active catalog is replaced atomically).
+config/.document-import-*.json

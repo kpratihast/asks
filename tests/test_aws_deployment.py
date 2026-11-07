@@ -41,14 +41,14 @@ def fake_project(tmp_path):
     (root/'config').mkdir();(root/'config/faculty_directory.json').write_text('{"faculty":[]}')
     private=root/'.local/private';private.mkdir(parents=True)
     (private/'original.pdf').write_bytes(b'private source');(private/'reviewed.html').write_text('private extraction')
-    doc={'original':'.local/private/original.pdf','extracted':'.local/private/reviewed.html',
+    doc={'id':'test-document','access_scope':'student','original':'.local/private/original.pdf','extracted':'.local/private/reviewed.html',
          'sha256':release_lib.sha(private/'original.pdf'),'extracted_sha256':release_lib.sha(private/'reviewed.html')}
     (root/'config/restricted_documents.json').write_text(json.dumps({'documents':[doc]}))
     (root/'config/local.json').write_text(json.dumps({'private':'must not package'}))
     (root/'.local/secret.json').write_text('SMTP_SECRET_NEVER_PACKAGE')
     (data/'auth').mkdir();(data/'auth/sessions.sqlite3').write_bytes(b'LOGIN_SESSION_NEVER_PACKAGE')
-    (data/'snapshot.json').write_text(json.dumps({'embedding_model':release_lib.MODEL,'snapshot_id':'test-snapshot'}))
-    (data/'chunks.jsonl').write_text('{"access_scope":"student"}\n')
+    (data/'snapshot.json').write_text(json.dumps({'embedding_model':release_lib.MODEL,'snapshot_id':'test-snapshot','active_version_ids':['v1']}))
+    (data/'chunks.jsonl').write_text('{"access_scope":"student","source_url":"/v1/documents/test-document","version_id":"v1"}\n')
     (data/'graph.json').write_text('[]');(data/'qdrant/collection/askiisc_chunks').mkdir(parents=True)
     (data/'qdrant/meta.json').write_text('{}')
     with sqlite3.connect(data/'qdrant/collection/askiisc_chunks/storage.sqlite') as db:db.execute('CREATE TABLE test (n INTEGER)')
@@ -285,3 +285,12 @@ def test_runtime_preflight_runs_as_service_user_to_avoid_root_owned_qdrant_lock(
     assert 'user' not in calls[1]
     import inspect
     assert 'as_app=True' in inspect.getsource(host.check)
+
+
+@pytest.mark.parametrize('scope', ['faculty', None])
+def test_packaging_refuses_stale_private_catalog(tmp_path, scope):
+    root, data, model = fake_project(tmp_path)
+    rows = [] if scope is None else [{'access_scope':scope, 'source_url':'/v1/documents/test-document','version_id':'v1'}]
+    (data/'chunks.jsonl').write_text(''.join(json.dumps(row)+'\n' for row in rows))
+    with pytest.raises(ValueError, match='catalog and selected snapshot'):
+        awsctl.package(root, data, tmp_path/'output', model, 'stale')

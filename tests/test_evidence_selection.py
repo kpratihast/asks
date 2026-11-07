@@ -12,7 +12,7 @@ from askiisc_retrieval.query_analysis import analyse
 
 
 def hit(i,section,text,**kw):
-    return {'marker':f'S{i}','title':'Source','section':section,'url':'https://example.org/source',
+    return {'access_scope':'public','marker':f'S{i}','title':'Source','section':section,'url':'https://example.org/source',
             'version_id':'v','chunk_ids':[f'c{i}'],'academic_term':None,'academic_year':'not term-specific',
             'programme':'not specified','location':section,'freshness':{'status':'current','snapshot':'s'},
             'instructor':None,'text':text,'excerpt':text,'rerank_score':None,'via':'vector',**kw}

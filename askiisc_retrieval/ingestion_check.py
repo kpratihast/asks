@@ -27,7 +27,7 @@ def check(store: IngestionQdrantStore, graph=None, active_ids: set[str] | None =
             how = {"chunk_id": f"Postgres map for {store.stats.mapped_chunk_ids}/{len(chunks)} points"
                    if store.stats.mapped_chunk_ids else "Qdrant point id (no Postgres map)",
                    "title": "first markdown heading / URL", "section_heading": "first markdown heading in the chunk",
-                   "doc_type": "URL rules", "access_scope": "'public' for all", "course_codes": "regex on text",
+                   "doc_type": "URL rules", "access_scope": "unclassified (excluded from retrieval)", "course_codes": "regex on text",
                    "academic_term": "NOT derivable -> None", "embedding_model": "Postgres or default"}.get(f, "-")
             rep["derived_fields"][f] = how
     by_type = Counter(c.doc_type for c in chunks)
@@ -85,7 +85,7 @@ def check(store: IngestionQdrantStore, graph=None, active_ids: set[str] | None =
     if "section_heading" not in native:
         P.append(f"No section_heading in payload; derived from markdown headings ({no_heading} chunks have none).")
     if "access_scope" not in native:
-        P.append("No access_scope: everything is treated as public; student/faculty/admin-only content cannot be protected.")
+        P.append("No access_scope: unclassified chunks are excluded. Ingestion must explicitly assign a valid access scope.")
     if "chunk_id" not in native and not store.stats.mapped_chunk_ids:
         P.append("Qdrant payload has no chunk_id and Postgres was not reachable: graph evidence (edges carry "
                  "chunk_id) cannot be matched to passages. Add chunk_id to the payload.")

@@ -20,7 +20,7 @@ KEYS = KeyStore({GUEST: {"tenant": "applicants", "role": "guest"},
                  STUDENT: {"tenant": "students", "role": "student"}})
 H = lambda k=GUEST: {"Authorization": f"Bearer {k}"}
 
-HIT = {"marker": "S1", "title": "Course Schedule", "section": "Aug - Dec 2026 | DS 252",
+HIT = {"access_scope": "public", "marker": "S1", "title": "Course Schedule", "section": "Aug - Dec 2026 | DS 252",
        "url": "https://cds.iisc.ac.in/courses/schedule/", "version_id": "v1", "chunk_ids": ["c1"],
        "academic_term": "2026-AUG", "academic_year": "2026-2027", "programme": "not specified",
        "location": "Aug - Dec 2026 | DS 252 (https://cds.iisc.ac.in/courses/schedule/)",
@@ -44,7 +44,7 @@ class FakeRetrieval:
                                  "rerank_top": 0.99, "degraded": False, "timings_ms": {"total": 12.0}}
 
     def source(self, chunk_id, scopes):
-        return {"chunk_id": chunk_id, "text": "full text"} if chunk_id == "c1" and "public" in scopes else None
+        return {"chunk_id": chunk_id, "text": "full text", "access_scope": "public"} if chunk_id == "c1" and "public" in scopes else None
 
     async def ready(self):
         return True
@@ -282,7 +282,7 @@ def test_sources_health_ready_metrics():
         assert c.get("/v1/sources/c1").status_code == 401
         assert c.get("/healthz").json() == {"status": "ok"}
         assert c.get("/readyz").status_code == 200
-        m = c.get("/metrics").text
+        m = c.get("/metrics", headers=H()).text
     assert 'askiisc_requests_total{mode="full",status="answered"} 1' in m and "askiisc_ttft_ms" in m
 
 

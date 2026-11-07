@@ -42,7 +42,7 @@ def fake(tmp_path_factory):
     for key, v, url, dept, idx, text, act, sup in ROWS:
         pts.append(models.PointStruct(id=PID[key], vector=emb.embed_query(text), payload={
             "id": PID[key], "version_id": v, "source_url": url, "department": dept, "chunk_index": idx,
-            "text": text, "is_active": act, "is_superseded": sup}))
+            "text": text, "access_scope": "public", "is_active": act, "is_superseded": sup}))
     client.upsert("iisc_policy_passages", points=pts)
     reg = DictRegistry(active={V1, V2, V3, VCSA},           # VOLD superseded, so not active
                        chunks={PID[k]: (CHUNK[k], None, "BAAI/bge-m3") for k in PID})
@@ -53,7 +53,7 @@ def fake(tmp_path_factory):
 def records(with_alias=True):
     fac = lambda n, al=None: (["Faculty"], {"name": n, **({"aliases": al} if al else {})})
     rec = lambda a, t, b, chunk, ver, **kw: {"la": a[0], "pa": a[1], "t": t, "lb": b[0], "pb": b[1],
-                                             "pr": {"chunk_id": chunk, "version_id": ver, "source_url": "x", **kw}}
+                                             "pr": {"access_scope": "public", "chunk_id": chunk, "version_id": ver, "source_url": "x", **kw}}
     return [
         rec(fac("Venky", ["R. Venkatesh Babu"] if with_alias else None), "RESEARCHES_IN",
             (["ResearchArea"], {"name": "Computer Vision"}), CHUNK["venky"], V1, academic_year="2026-2027"),
@@ -188,7 +188,7 @@ def test_old_v2_graph_is_validated_not_trusted():
     """Ingestion v2 graphs: co-instructors in one node, room numbers as courses, no research edges."""
     from askiisc_retrieval.graph_neo4j import Neo4jGraphStore
     from askiisc_retrieval.stores import Edge
-    ev = {"chunk_id": "c1", "version_id": "v1", "source_url": "u", "academic_term": "2024-AUG"}
+    ev = {"access_scope": "public", "chunk_id": "c1", "version_id": "v1", "source_url": "u", "academic_term": "2024-AUG"}
     recs = [
         {"la": ["Course"], "pa": {"code": "DS221"}, "t": "TAUGHT_BY", "pr": ev,
          "lb": ["Faculty"], "pb": {"name": "S.Vadhiyar & Y. Simmhan"}},

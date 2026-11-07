@@ -192,3 +192,7 @@ python -m askiisc_retrieval.cli eval --questions test_cds120.yaml --out test_cds
 python tools/score_heldout.py test_cds120_<corpus>.csv
 ```
 Ignore the "best threshold" line that `eval` prints for this file: the threshold stays at the dev value.
+
+## Mandatory document classification
+
+Every ingestion chunk and Neo4j relationship must now carry an explicit `access_scope` (`public`, `student`, `faculty`, `admin`, or `staff`). Missing classifications no longer default to public: unclassified chunks cannot be retrieved by a supported role, and unclassified graph relationships are skipped before aliases or paths are constructed. Backfill legacy public crawls only after reviewing their provenance. Private inputs must retain their actual classification.

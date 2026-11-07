@@ -51,6 +51,11 @@ def package(root,data,out,model_dir=None,release_id=None):
             if p.is_file():copy(p,hf/'snapshots'/revision/p.relative_to(model_dir))
         (hf/'refs').mkdir();(hf/'refs/main').write_text(revision)
         chunks=[json.loads(line) for line in (data/'chunks.jsonl').read_text().splitlines() if line.strip()]
+        for doc in private['documents']:
+            matches=[c for c in chunks if c.get('source_url')=='/v1/documents/'+doc['id']
+                     and c.get('version_id') in snap.get('active_version_ids', [])]
+            if not matches or any(c['access_scope']!=doc['access_scope'] for c in matches):
+                raise ValueError('Private catalog and selected snapshot disagree; use --data-dir from the successful document import')
         files={str(p.relative_to(tree)):sha(p) for p in sorted(tree.rglob('*')) if p.is_file()}
         content=hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
         rid=valid_id(release_id or datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+content[:10])

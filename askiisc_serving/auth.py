@@ -74,7 +74,7 @@ class KeyStore:
             return None
         presented = authorization[7:].strip()
         for k, p in self._keys.items():                  # constant-time compare per key
-            if hmac.compare_digest(k, presented):
+            if hmac.compare_digest(k.encode('utf-8'), presented.encode('utf-8')):
                 return p
         return None
 
