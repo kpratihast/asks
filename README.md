@@ -55,3 +55,13 @@ Send the same question twice to `POST /v1/ask` with `"mode":"vector"` and `"mode
 For example, a schedule row identifies an instructor, a course page links to the instructor’s profile, and the profile publishes an email. The answer needs the passages that establish the connection. Graph RAG keeps them together and checks that the answer cites them.
 
 Run `python -m pytest -q` for the regression suite. See [dev.md](dev.md) for the code map and evaluation steps. See [AWS deployment](AWS_DEPLOYMENT.md) for packaging and release commands.
+
+
+## Team ASKS
+
+| Member | Role |
+|---|---|
+| Kshitij Pratihast | API contracts, serving, UI, department routing |
+| Aditya Barodia | Evaluation, held-out sets, freshness |
+| Smit Patel | Ingestion pipeline, crawling, stores |
+| Sejadri Banik | Retrieval, GPU serving (vLLM), cluster deployment |
