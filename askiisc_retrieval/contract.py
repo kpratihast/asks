@@ -66,6 +66,7 @@ class Citation:
     rerank_score: Optional[float] = None
     via: str = "vector"
     access_scope: str = "public"
+    department: str = ""
 
 
 @dataclass
@@ -87,6 +88,8 @@ class RetrievalResult:
     graph_proofs: list[dict] = field(default_factory=list)
     connection_status: Optional[str] = None
     policy_trace: dict = field(default_factory=dict)
+    departments: tuple[str, ...] = ()
+    department_status: str | None = None
 
     @property
     def top_score(self) -> float:

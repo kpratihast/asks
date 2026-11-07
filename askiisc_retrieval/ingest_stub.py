@@ -32,6 +32,7 @@ class PageInput:
     department: str = "CDS"
     active: bool = True           # False = indexed but superseded (tests version filtering)
     version_tag: str = ""         # distinguishes a synthetic older version of the same URL
+    tagged_departments: bool = False  # opt in for reviewed, normalized institute pages
 
 
 def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, graph_path: Path,
@@ -42,7 +43,7 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
     all_chunks: list[ChunkPayload] = []
     active: set[str] = set()
     report = []
-    parsed_all = [parse_html(p.url, p.html) for p in pages]
+    parsed_all = [parse_html(p.url, p.html, tagged_departments=p.tagged_departments) for p in pages]
     template_removed = remove_template_sections(parsed_all)
     for p, parsed in zip(pages, parsed_all):
         body = "\n".join(s.text for s in parsed.sections)
@@ -50,7 +51,8 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
             report.append({"url": p.url, "status": f"NOT INDEXED: only {len(body)} chars of main content "
                            "(the real content is probably in a linked PDF/iframe; tell the ingestion team)"})
             continue
-        version_id = h(f"{p.url}|{h(body)}|{p.version_tag}|scope:{p.scope}")
+        ownership = "|".join(f"{s.heading}:{s.department or p.department}" for s in parsed.sections)
+        version_id = h(f"{p.url}|{h(body)}|{p.version_tag}|scope:{p.scope}|{h(ownership)}")
         chunks = chunk_page(parsed, version_id=version_id, document_id=h(p.url, 12), scope=p.scope,
                             doc_type=p.doc_type, department=p.department, embedding_model=embedder.model_id)
         all_chunks.extend(chunks)
@@ -59,7 +61,7 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
         from .query_analysis import term_key
         terms = sorted({c.academic_term for c in chunks if c.academic_term}, key=term_key)
         report.append({"url": p.url, "version_id": version_id, "active": p.active, "sections": len(parsed.sections),
-                       "chunks": len(chunks), "terms": f"{terms[0]}..{terms[-1]} ({len(terms)})" if terms else "-"})
+                       "chunks": len(chunks), "departments": sorted({c.department for c in chunks}), "terms": f"{terms[0]}..{terms[-1]} ({len(terms)})" if terms else "-"})
 
     print(f"Embedding {len(all_chunks)} chunks with {embedder.model_id} ...")
     vectors = embedder.embed_documents([c.embedding_input() for c in all_chunks])
@@ -69,7 +71,8 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
     graph.save(graph_path)
     snap = Snapshot(snapshot_id="snap-" + h("|".join(sorted(active)) + embedder.model_id + GRAPH_RULES_VERSION, 10),
                     embedding_model=embedder.model_id, graph_version=GRAPH_RULES_VERSION,
-                    active_version_ids=frozenset(active))
+                    active_version_ids=frozenset(active),
+                    departments=tuple(sorted({c.department for c in all_chunks if c.version_id in active})))
     JsonSnapshotProvider.write(snapshot_path, snap)
     if chunks_path:
         with chunks_path.open("w", encoding="utf-8") as f:
@@ -91,17 +94,25 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
         if not f.exists():
             missing.append(pg["url"])
             continue
-        pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], pg["scope"], src.get("department", "CDS")))
+        pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], pg["scope"],
+                               pg.get("department", src["department"])))
     if missing:
         print(f"WARNING: {len(missing)} page(s) not fetched yet (run `fetch` first): {missing}")
     crawl_index = RAW_DIR / "crawl.json"
-    if src.get("crawl") and crawl_index.exists():
+    if src["crawls"] and crawl_index.exists():
+        from urllib.parse import urlsplit
+        hosts = {urlsplit(seed).netloc: group["department"]
+                 for group in src["crawls"] for seed in group["seeds"]}
         listed = {pg["url"] for pg in src["pages"]}
         for pg in json.loads(crawl_index.read_text(encoding="utf-8")):
             f = RAW_DIR / raw_name(pg["url"])
             if pg["url"] in listed or not f.exists():
                 continue
-            pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], "public", src.get("department", "CDS")))
+            host = urlsplit(pg["url"]).netloc
+            owner = next((hosts[root] for root in sorted(hosts, key=len, reverse=True)
+                          if host == root or host.endswith("." + root)), None)
+            if owner and pg.get("department", owner) == owner:
+                pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], "public", owner))
     fx_path = ROOT / src.get("fixtures", "fixtures/fixtures.yaml")
     if include_fixtures and fx_path.exists():
         for fx in yaml.safe_load(fx_path.read_text(encoding="utf-8"))["fixtures"]:

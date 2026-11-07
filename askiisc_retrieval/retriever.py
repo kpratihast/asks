@@ -22,6 +22,7 @@ from concurrent.futures import TimeoutError as FutTimeout
 
 from . import config
 from .contract import ChunkPayload, Passage, RetrievalResult
+from .departments import DEFAULT, SHARED, course_department
 from .query_analysis import QueryInfo, analyse, term_key, requested_relations
 
 
@@ -76,26 +77,84 @@ class Retriever:
         info = analyse(query, self.today_term)
         t = lap("analyse", t0)
 
+        departments = info.departments
+        campus = set(snap.departments) - {SHARED}
+        if not departments and len(campus) > 1 and (owner := course_department(info.course_codes)):
+            departments = (owner,)
+        graph_departments = None
+        graph_route = None
+        clarification = False
+        if len(departments) == 1:
+            graph_departments = departments
+            if departments == (DEFAULT,) and not campus - {DEFAULT}:
+                graph_departments = (*departments, None)  # graphs from existing CDS-only releases
+        elif len(departments) > 1 or len(campus) > 1:
+            graph_route = "comparison" if departments else "campus_search"
+            use_graph = False
+            if not departments:
+                from .policy_graph import programmes, requested_facets
+                clarification = bool(programmes(query) and set(requested_facets(query)) & {
+                    "ELIGIBILITY", "INTAKE", "SELECTION", "TEST_SYLLABUS", "COURSEWORK",
+                    "DISSERTATION", "LAB_PREFERENCES",
+                })
+
+        if len(departments) > min(self.top_k, 3):
+            return RetrievalResult(query, [], snap.snapshot_id, evidence_sufficient=False,
+                                   department_status="narrow_comparison")
+        if clarification:
+            return RetrievalResult(query, [], snap.snapshot_id, evidence_sufficient=False,
+                                   department_status="clarify")
+
         qvec = self.embedder.embed_query(query)
         t = lap("embed", t)
 
-        hits = self.store.search(qvec, self.candidates, snap.active_version_ids, scopes, snap.embedding_model)
+        # Search each named department independently so a large department cannot
+        # use up the candidate budget before smaller departments are searched.
+        routes = [(dept,) for dept in (*departments, SHARED)] if departments else [None]
+
+        def search(k, **filters):
+            found = {}
+            for route in routes:
+                if route:
+                    filters["departments"] = route
+                for chunk, score in self.store.search(qvec, k, snap.active_version_ids, scopes,
+                                                      snap.embedding_model, **filters):
+                    found.setdefault(chunk.chunk_id, (chunk, score))
+            return list(found.values())
+
+        hits = search(self.candidates)
         via = {c.chunk_id: "vector" for c, _ in hits}
-        if info.course_codes:                           # exact-identifier pass: dense vectors blur "DS 252"
-            for c, s in self.store.search(qvec, self.candidates, snap.active_version_ids, scopes,
-                                          snap.embedding_model, course_codes=info.course_codes):
+        if info.course_codes:
+            for c, score in search(self.candidates, course_codes=info.course_codes):
                 if c.chunk_id not in via:
-                    hits.append((c, s))
+                    hits.append((c, score))
                     via[c.chunk_id] = "course_code"
-        people_hits = []                                # people pass: profile chunks for "who / which lab" questions
+        people_hits = []
         if info.wants_people and self.people_k:
-            people_hits = self.store.search(qvec, self.people_k, snap.active_version_ids, scopes,
-                                            snap.embedding_model, doc_types=list(config.PEOPLE_DOC_TYPES))
+            people_hits = search(self.people_k, doc_types=list(config.PEOPLE_DOC_TYPES))
+        if departments:
+            from .policy_graph import programmes
+
+            requested_programmes = set(programmes(query))
+            cfti = bool(re.search(r"\bCFTI\b", query, re.I))
+
+            def applicable(hit):
+                chunk, _ = hit
+                if chunk.doc_type not in {"admissions", "policy"}:
+                    return True
+                if not cfti and re.search(r"\bCFTI\b", chunk.title, re.I):
+                    return False
+                source_programmes = set(programmes(chunk.section_heading) or programmes(chunk.title))
+                return not (requested_programmes and source_programmes
+                            and requested_programmes.isdisjoint(source_programmes))
+
+            hits = [hit for hit in hits if applicable(hit)]
         t = lap("search", t)
 
         rerank = use_rerank and self.reranker is not None
         pool = self.rerank_pool if rerank else self.top_k
-        ranked = self._rank(self._apply_term_logic(hits, info), info)[: max(pool, self.top_k)]
+        ranked = self._rank(self._apply_term_logic(hits, info), info)
+        ranked = self._cover_departments(ranked, departments, lambda item: item[0].department)[:max(pool, self.top_k)]
         if rerank:                                      # people-pass chunks always reach the reranker, which
             have = {c.chunk_id for c, _ in ranked}      # decides; a short profile chunk is otherwise cut by
             for c, s in people_hits:                    # long general pages before it is ever scored (cf. q14)
@@ -109,13 +168,14 @@ class Retriever:
         rerank_error = None
         if rerank:                                      # before the graph, so graph seeds come from the best passages
             rerank_error = self._rerank(query, passages)
-            passages = self._order(passages, info)[: self.top_k]
+            passages = self._cover_departments(self._order(passages, info), departments,
+                                              lambda passage: passage.chunk.department)[:self.top_k]
             t = lap("rerank", t)
 
         degraded, reason = False, None
         if use_graph and self.graph is not None:
             try:
-                extra = _graph_pool.submit(self._graph_passages, passages, info, snap, scopes) \
+                extra = _graph_pool.submit(self._graph_passages, passages, info, snap, scopes, graph_departments) \
                     .result(timeout=self.graph_timeout_s)
                 t = lap("graph", t)
                 if extra and rerank and rerank_error is None:
@@ -134,12 +194,12 @@ class Retriever:
         if use_graph:
             from .connections import plan_for, resolve_connections
             try:
-                plan = plan_for(info, self.graph)
+                plan = plan_for(info, self.graph, departments=graph_departments)
                 if plan is not None:
                     connection_status = "missing_path"
                     if self.graph is not None:
                         proof_passages, graph_proofs, connection_status = _graph_pool.submit(
-                            resolve_connections, self.graph, self.store, snap, scopes, plan
+                            resolve_connections, self.graph, self.store, snap, scopes, plan, departments=graph_departments
                         ).result(timeout=self.graph_timeout_s)
             except Exception as exc:
                 # A partial or failed join is never treated as a proved connected answer.
@@ -150,7 +210,7 @@ class Retriever:
             from .policy_graph import retrieve_policy
             try:
                 policy_passages, policy_proofs, policy_trace = _graph_pool.submit(
-                    retrieve_policy, query, self.graph, self.store, snap, scopes
+                    retrieve_policy, query, self.graph, self.store, snap, scopes, departments=graph_departments
                 ).result(timeout=self.graph_timeout_s)
                 if policy_passages:
                     proof_passages = policy_passages
@@ -166,19 +226,35 @@ class Retriever:
         if proof_passages:
             proved = {p.chunk.chunk_id for p in proof_passages}
             passages = proof_passages + [p for p in passages if p.chunk.chunk_id not in proved]
-        passages = self._audit(passages, snap.active_version_ids, scopes, snap.embedding_model)
+        allowed_departments = (*departments, SHARED) if departments else ()
+        passages = self._audit(passages, snap.active_version_ids, scopes, snap.embedding_model, allowed_departments)
+        passages = self._cover_departments(passages, departments if len(departments) > 1 else (),
+                                           lambda passage: passage.chunk.department)
+        missing_departments = set(departments) - {p.chunk.department for p in passages}
         timings["total"] = round((time.perf_counter() - t0) * 1000, 1)
         scores = [p.rerank_score for p in passages if p.rerank_score is not None]
         top = max(scores) if (rerank and rerank_error is None and scores) else None
         sufficient = None if (top is None or self.rerank_min is None) else top >= self.rerank_min
-        if connection_status is not None and connection_status != "complete":
+        if missing_departments or (connection_status is not None and connection_status != "complete"):
             sufficient = False
         citations = build_citations(passages)            # only audited passages can be cited
         return RetrievalResult(query, passages, snap.snapshot_id, degraded, reason,
                                info.target_term, timings, top, sufficient, rerank_error, citations,
-                               graph_proofs=graph_proofs, connection_status=connection_status, policy_trace=policy_trace)
+                               graph_proofs=graph_proofs, connection_status=connection_status, policy_trace=policy_trace,
+                               departments=departments,
+                               department_status="missing_evidence" if missing_departments else graph_route)
 
     # ------------------------------------------------------------------ steps
+    @staticmethod
+    def _cover_departments(items, departments, owner):
+        first = {}
+        for index, item in enumerate(items):
+            if owner(item) in departments:
+                first.setdefault(owner(item), index)
+        indices = set(first.values())
+        return [items[first[d]] for d in departments if d in first] + [
+            item for index, item in enumerate(items) if index not in indices]
+
     def _apply_term_logic(self, hits: list[tuple[ChunkPayload, float]], info: QueryInfo):
         """Term-bound chunks (schedule rows) are versioned by term, not by document: an older term's
         schedule is a valid page, so the version filter cannot remove it. Handle it here."""
@@ -199,8 +275,8 @@ class Retriever:
                 by_key[key] = (c, s)                     # keep the latest term <= current
         out, seen_text = [], set()
         for c, s in timeless + list(by_key.values()):
-            if c.text not in seen_text:                  # drop exact duplicates
-                seen_text.add(c.text)
+            if (c.department, c.text) not in seen_text:                  # drop exact duplicates
+                seen_text.add((c.department, c.text))
                 out.append((c, s))
         return out
 
@@ -251,11 +327,12 @@ class Retriever:
             p.rerank_score = sc
         return None
 
-    def _graph_passages(self, passages: list[Passage], info: QueryInfo, snap, scopes) -> list[Passage]:
+    def _graph_passages(self, passages: list[Passage], info: QueryInfo, snap, scopes, departments=None) -> list[Passage]:
         """Seeds: courses and people named in the question (these define relevance), plus courses/people
         in the top-3 passages. Only evidence edges contribute chunks; chunks connected to more of the
         question's own entities rank first (q18: a course linked to BOTH named instructors)."""
-        query_seeds = [f"Course:{c}" for c in info.course_codes] + self.graph.find_people(info.query)
+        graph_filter = {"departments": departments} if departments else {}
+        query_seeds = [f"Course:{c}" for c in info.course_codes] + self.graph.find_people(info.query, **graph_filter)
         seeds = list(query_seeds)
         for e in self.graph.entities_of_chunks([p.chunk.chunk_id for p in passages[:3]]):
             if e.split(":", 1)[0] in ("Course", "Person") and e not in seeds:
@@ -266,7 +343,7 @@ class Retriever:
         # links both people named in the question (seen on real data once reranking added more seeds).
         hits = self.graph.expand(seeds, snap.active_version_ids, scopes, self.graph_hops, limit=None,
                                  target_term=info.target_term, explicit=info.term_is_explicit,
-                                 now_term=self.today_term or config.current_term())
+                                 now_term=self.today_term or config.current_term(), **graph_filter)
         have = {p.chunk.chunk_id for p in passages}
         qs = set(query_seeds)
         requested = requested_relations(info.query)
@@ -357,11 +434,12 @@ class Retriever:
                 passages.append(Passage(c, 1.0, 'document'))
         return passages
 
-    def _audit(self, passages: list[Passage], version_ids, scopes, model) -> list[Passage]:
+    def _audit(self, passages: list[Passage], version_ids, scopes, model, departments=()) -> list[Passage]:
         ok = []
         for p in passages:
             c = p.chunk
-            if c.version_id in version_ids and c.access_scope in scopes and c.embedding_model == model:
+            if (c.version_id in version_ids and c.access_scope in scopes and c.embedding_model == model
+                    and (not departments or c.department in departments)):
                 ok.append(p)
             else:
                 self.audit_violations += 1

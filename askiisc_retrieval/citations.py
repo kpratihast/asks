@@ -29,17 +29,17 @@ def _excerpt(text: str, limit: int = 300) -> str:
 
 def build_citations(passages: list[Passage]) -> list[Citation]:
     """Markers follow passage order (best first). Chunks from the same page section share a marker."""
-    by_key: dict[tuple[str, str, str], Citation] = {}
+    by_key: dict[tuple[str, ...], Citation] = {}
     out: list[Citation] = []
     for p in passages:
         c = p.chunk
-        key = (c.source_url, c.section_heading, c.version_id, c.access_scope)
+        key = (c.source_url, c.section_heading, c.version_id, c.access_scope, c.department)
         cit = by_key.get(key)
         if cit is None:
             cit = Citation(marker=f"S{len(out) + 1}", source_url=c.source_url, title=c.title,
                            section_heading=c.section_heading, version_id=c.version_id,
                            academic_term=c.academic_term, chunk_ids=[], excerpt=_excerpt(c.text),
-                           rerank_score=p.rerank_score, via=p.via, access_scope=c.access_scope)
+                           rerank_score=p.rerank_score, via=p.via, access_scope=c.access_scope, department=c.department)
             by_key[key] = cit
             out.append(cit)
         cit.chunk_ids.append(c.chunk_id)
@@ -102,6 +102,8 @@ def result_to_dict(result: RetrievalResult, include_text: bool = True) -> dict:
     from dataclasses import asdict
     return {
         "query": result.query,
+        "departments": list(result.departments),
+        "department_status": result.department_status,
         "graph_proofs": result.graph_proofs,
         "connection_status": result.connection_status,
         "policy_trace": result.policy_trace,
@@ -113,7 +115,8 @@ def result_to_dict(result: RetrievalResult, include_text: bool = True) -> dict:
         "degraded_reason": result.degraded_reason,
         "citations": [asdict(c) for c in result.citations],
         "passages": [{"marker": p.marker, "chunk_id": p.chunk.chunk_id, "source_url": p.chunk.source_url,
-                      "section_heading": p.chunk.section_heading, "access_scope": p.chunk.access_scope, "via": p.via, "vector_score": round(p.score, 4),
+                      "section_heading": p.chunk.section_heading, "department": p.chunk.department,
+                      "access_scope": p.chunk.access_scope, "via": p.via, "vector_score": round(p.score, 4),
                       "rerank_score": None if p.rerank_score is None else round(p.rerank_score, 4),
                       "graph_path": p.graph_path, "graph_support": p.graph_support,
                       **({"text": p.chunk.text} if include_text else {})}

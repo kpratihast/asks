@@ -22,7 +22,7 @@ class ConnectionPlan:
     answer_relation: str
 
 
-def plan_for(info, graph):
+def plan_for(info, graph, *, departments=None):
     if not course_exam_intent(info.query):return None
     venue = bool(re.search(r'\b(?:where|venue|room|location)\b', info.query, re.I))
     tail = ('SCHEDULED_AT','EXAM_ON') + (('HELD_IN',) if venue else ())
@@ -31,7 +31,7 @@ def plan_for(info, graph):
         return ConnectionPlan(tuple('Course:'+c for c in info.course_codes),tail,info.target_term,answer_relation)
     if graph is not None:
         try:
-            people=graph.find_people(info.query)
+            people=graph.find_people(info.query, departments=departments) if departments else graph.find_people(info.query)
         except Exception:
             if re.search(r'taught|teach|instructor|professor', info.query, re.I):
                 return ConnectionPlan(('UnresolvedPerson',),('^TAUGHT_BY','SCHEDULED_AT','EXAM_ON'),info.target_term,'EXAM_ON')
@@ -68,8 +68,10 @@ def bounded_paths(edges, starts, relations, version_ids, scopes, term, *, max_st
     return states
 
 
-def resolve_connections(graph, store, snapshot, scopes, plan):
+def resolve_connections(graph, store, snapshot, scopes, plan, *, departments=None):
     edges=graph.active_edges() if hasattr(graph,'active_edges') else graph.edges
+    if departments is not None:
+        edges = [e for e in edges if e.department in departments]
     paths=bounded_paths(edges,plan.starts,plan.relations,snapshot.active_version_ids,scopes,plan.term)
     ids=sorted({cid for _,_,path in paths for e in path for cid in e.chunk_ids})
     chunks={c.chunk_id:c for c in store.get(ids)}
@@ -79,6 +81,7 @@ def resolve_connections(graph, store, snapshot, scopes, plan):
                    and chunks[cid].access_scope==e.scope and chunks[cid].access_scope in scopes
                    and chunks[cid].embedding_model==snapshot.embedding_model
                    and chunks[cid].version_id in snapshot.active_version_ids
+                   and (departments is None or chunks[cid].department in departments)
                    for e in path for cid in e.chunk_ids):continue
         courses=sorted({n for e in path for n in (e.src,e.dst) if n.startswith('Course:')})
         if len(courses)!=1:continue

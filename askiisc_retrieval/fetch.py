@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import yaml
@@ -19,7 +22,32 @@ def raw_name(url: str) -> str:
 
 
 def load_sources() -> dict:
-    return yaml.safe_load((ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    from .departments import DEFAULT, SHARED, source_departments, validate_codes
+
+    path = Path(os.environ.get("ASKIISC_SOURCES_FILE", ROOT / "sources.yaml")).expanduser()
+    sources = yaml.safe_load(path.read_text(encoding="utf-8"))
+    default = sources.get("department", DEFAULT)
+    groups = sources.get("crawls", [])
+    if sources.get("crawl"):
+        groups = [{"department": default, **sources["crawl"]}, *groups]
+    pages = sources["pages"]
+    if len({page["url"] for page in pages}) != len(pages):
+        raise ValueError("A source URL must have exactly one configured owner")
+    hosts = {}
+    for group in groups:
+        group_hosts = {urlsplit(seed).netloc for seed in group["seeds"]}
+        if len(group_hosts) != 1 or "" in group_hosts:
+            raise ValueError("Each crawl group requires seeds on one host")
+        host = group_hosts.pop()
+        if host in hosts:
+            raise ValueError(f"Duplicate crawl host: {host}")
+        hosts[host] = group["department"]
+    validate_codes([default, *(page.get("department", default) for page in pages),
+                    *(group["department"] for group in groups)])
+    enabled = {*source_departments(default), SHARED}
+    return {**sources, "department": default,
+            "pages": [page for page in pages if page.get("department", default) in enabled],
+            "crawls": [group for group in groups if group["department"] in enabled]}
 
 
 def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
@@ -27,8 +55,9 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
     index_path = RAW_DIR / "index.json"
     index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {}
     results = []
+    sources = load_sources()
     with httpx.Client(headers={"User-Agent": UA}, follow_redirects=True, timeout=30) as client:
-        for page in load_sources()["pages"]:
+        for page in sources["pages"]:
             url, path = page["url"], RAW_DIR / raw_name(page["url"])
             if path.exists() and not refresh:
                 results.append({"url": url, "status": "cached"})
@@ -46,12 +75,12 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
             print(f"  saved   {url}  ({len(r.content) // 1024} KB)")
             results.append({"url": url, "status": "saved"})
             time.sleep(delay_s)                  # be polite to the institute server
-        crawl_cfg = load_sources().get("crawl")
-        if crawl_cfg:
+        for crawl_cfg in sources["crawls"]:
             from .crawl import crawl
             print(f"\nCrawling {crawl_cfg['seeds']} (depth {crawl_cfg['max_depth']}, max {crawl_cfg['max_pages']} pages) ...")
             found = crawl(crawl_cfg["seeds"], crawl_cfg["max_depth"], crawl_cfg["max_pages"], client, raw_name,
-                          delay_s=crawl_cfg.get("delay_s", 0.5))
+                          delay_s=crawl_cfg.get("delay_s", 0.5),
+                          department=crawl_cfg["department"])
             results.append({"url": "(crawl)", "status": f"{len(found)} pages"})
             print(f"Crawl: {len(found)} pages")
     index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")

@@ -8,6 +8,8 @@ reverse path into another department is never traversed.
 from __future__ import annotations
 from collections import defaultdict, deque
 import hashlib,re
+from urllib.parse import urlsplit
+from .departments import SHARED, mentioned
 from .stores import Edge
 from .contract import Passage
 
@@ -39,9 +41,9 @@ def category(value):
     return ''
 
 def department(value):
-    # Full names are associated with their published acronym, not a fuzzy substring.
-    if re.search(r'\bCDS\b|computational\s*(?:&|and)\s*data\s*sciences?',value,re.I):return 'CDS'
-    return ''
+    codes = mentioned(value)
+    return codes[0] if len(codes) == 1 else ''
+
 
 # Classifiers describe evidence types; they do not contain institution-specific amounts,
 # dates, course IDs, source URLs, names, or expected answers.
@@ -55,7 +57,7 @@ FACT_PATTERNS={
  'APPLICATION_FEE':r'(?:Online Application Fees|application fee.*?(?:Rs\.?|INR)|Category\s+Application Fee)',
  'APPLICATION_CHOICES':r'(?:one application form|single application|maximum of\s*\d+\s*disciplines)',
  'LAB_PREFERENCES':r'(?:choose|select).*?(?:three|\d+)\s+labs',
- 'SELECTION':r'(?:oral interview|written and interview|(?:mandatory|required|performance|score|selection).{0,90}written test|written test.{0,50}(?:mandatory|required)|performance in.*?interview|selection procedure\s*:)',
+ 'SELECTION':r'(?:oral interview|written and interview|(?:mandatory|required|performance|score|selection).{0,90}written test|written test.{0,50}(?:mandatory|required)|performance in.*?interview|no written test|selection (?:procedure|process)\s*:)',
  'TEST_SYLLABUS':r'syllabus for the written test|Programming\s*:\s*Data Structures',
  'ELIGIBILITY':r'(?:GATE paper|valid GATE|Basic Qualification for Eligibility|Qualification with required)',
  'INTAKE':r'\bIntake\s*:\s*\d+',
@@ -108,13 +110,14 @@ def build_policy_edges(chunks,institution='IISc'):
                 dep=department(c.text.split('|')[0][:300])
             if dep and not ps:ps=doc_programmes
             cy=cycle(c.section_heading) or doc_cycle
-            qual={'cycle':cy,'category':category(leaf),'origin':'department' if c.department!=institution else 'institute'}
+            central = c.department == institution or urlsplit(c.source_url).hostname in {'www.iisc.ac.in', 'iisc.ac.in'}
+            qual={'cycle':cy,'category':category(leaf),'origin':'institute' if central else 'department'}
             if re.search(r'(?:admission.*notice|mid.year.*notice)',title,re.I):qual['document_kind']='notice'
             if re.search(r'CFTI',title,re.I):qual['route']='CFTI'
             if re.search(r'undergraduate',leaf,re.I):qual['level']='UG'
             elif re.search(r'post.?graduate|PG/',leaf,re.I):qual['level']='PG'
             def add(src,rel,dst):
-                edges.append(Edge(src,rel,dst,(c.chunk_id,),c.version_id,c.access_scope,None,tuple(sorted((k,v) for k,v in qual.items() if v))))
+                edges.append(Edge(src,rel,dst,(c.chunk_id,),c.version_id,c.access_scope,None,tuple(sorted((k,v) for k,v in qual.items() if v)), dep or c.department))
             inst='Institution:'+institution
             subjects=[]
             for p in ps:
@@ -158,7 +161,7 @@ def requested_facets(query):
     add('INTAKE',r'\bintake\b|number of seats')
     add('CONTACT',r'\be.?mail\b|contact.*queries')
     add('QUOTA',r'quota')
-    add('SELECTION',r'selection|oral interview|written test.*(?:require|must|mandatory)|(?:must|require|mandatory).*written test')
+    add('SELECTION',r'selection|oral interview|written test.*(?:require|must|mandatory)|(?:must|require|mandatory).*written test|(?:is|was|will there be).*?written test')
     add('INTERVIEW_DATES',r'interview dates|date.*interview|interview.*ranges')
     add('APPLICATION_DEADLINE',r'deadline|closing date|application.*close')
     add('SESSION_START',r'semester.*start|commencement|session.*start')
@@ -182,13 +185,20 @@ def roots_for(query,edges):
     return roots
 
 
-def retrieve_policy(query,graph,store,snapshot,scopes,*,max_states=512,max_candidates=100,max_sources=6):
+def retrieve_policy(query,graph,store,snapshot,scopes,*,departments=None,max_states=512,max_candidates=100,max_sources=6):
     facets=requested_facets(query)
     if not facets:return [],[],{}
     all_edges=graph.active_edges() if hasattr(graph,'active_edges') else graph.edges
     edges=[e for e in all_edges if e.chunk_ids and e.scope in scopes and e.version_id in snapshot.active_version_ids]
+    if departments is not None:
+        edges = [e for e in edges if e.department in (*departments, SHARED)]
     roots=roots_for(query,all_edges);cy=cycle(query);year=re.search(r'\b20\d{2}\b',query);cat=category(query)
-    compare_origins=bool(re.search(r'central|institute.*department|general.*CDS',query,re.I)) and ('SELECTION' in facets or 'CONTACT' in facets)
+    department_name = department(query)
+    compare_origins = (
+        bool(re.search(r'central|institute.*department', query, re.I)
+             or (department_name and re.search(r'general.*' + re.escape(department_name), query, re.I)))
+        and bool({'SELECTION', 'CONTACT'} & set(facets))
+    )
     want_origins=('institute','department') if compare_origins else ('',)
     requirements={(f,o) for f in facets for o in (want_origins if f in ('SELECTION','CONTACT') else ('',))}
     compare_dates='INTERVIEW_DATES' in facets and bool(re.search(r'compare|agree|two|both|differ',query,re.I))
@@ -245,6 +255,7 @@ def retrieve_policy(query,graph,store,snapshot,scopes,*,max_states=512,max_candi
     def valid(path):
         return all(cid in chunks and chunks[cid].version_id==e.version_id and chunks[cid].access_scope==e.scope
                    and chunks[cid].access_scope in scopes and chunks[cid].embedding_model==snapshot.embedding_model
+                   and (departments is None or chunks[cid].department in (*departments, SHARED))
                    for e in path for cid in e.chunk_ids)
     candidates=[(req,path) for req,path in candidates if valid(path)]
     words=set(re.findall(r'[a-z]{3,}',query.lower()))

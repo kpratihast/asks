@@ -175,3 +175,7 @@ Automatic AWS deployments from GitHub: see [GITHUB_DEPLOYMENT.md](deploy/aws/GIT
 Load-control diagnosis, effective AWS limits and a reproducible C=20 / Q=10 check: [LOAD_TESTING.md](LOAD_TESTING.md).
 
 Private document imports: [single-command student/professor ingestion](DOCUMENT_INGESTION.md). Security controls and assessment limitations: [security review](SECURITY_REVIEW.md).
+
+## Adding IISc departments
+
+The default source selection is CDS. Use [the department rollout guide](DEPARTMENTS.md) to build a separate CDS/CSA/ECE pilot index, add a department, or point the cluster retrieval service at a wider corpus.

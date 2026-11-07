@@ -49,7 +49,7 @@ def chunk_page(page: ParsedPage, *, version_id: str, document_id: str, scope: st
             chunks.append(ChunkPayload(
                 chunk_id=h(f"{version_id}:{ordinal}", 32), document_id=document_id, version_id=version_id,
                 source_url=page.url, title=page.title, section_heading=sec.heading, text=piece,
-                access_scope=scope, doc_type=doc_type, department=department,
+                access_scope=scope, doc_type=doc_type, department=sec.department or department,
                 academic_term=sec.academic_term, course_codes=codes,
                 embedding_model=embedding_model, ordinal=ordinal))
     return chunks

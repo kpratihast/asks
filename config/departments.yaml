@@ -1,0 +1,11 @@
+# Codes are stable index keys. Use unambiguous aliases in questions.
+departments:
+  CDS:
+    name: Computational and Data Sciences
+    aliases: [Computational & Data Sciences, Computational and Data Science, Computational & Data Science]
+    course_prefixes: [DS]
+  CSA:
+    name: Computer Science and Automation
+    aliases: [Computer Science & Automation]
+  ECE:
+    name: Electrical Communication Engineering

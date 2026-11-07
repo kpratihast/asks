@@ -76,6 +76,7 @@ class Section:
     academic_term: str | None = None
     kind: str = "text"                      # text | row
     course_codes: list[str] = field(default_factory=list)
+    department: str | None = None
 
     @property
     def heading(self) -> str:
@@ -117,33 +118,38 @@ def drop_report(html: str | bytes) -> list[tuple[str, int]]:
     return out
 
 
-def parse_html(url: str, html: str | bytes) -> ParsedPage:
+def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False) -> ParsedPage:
     soup = BeautifulSoup(html, "lxml")
     title = norm(soup.title.get_text()) if soup.title else url
     title = re.split(r"\s+[|–-]\s+|:\s+", title)[0] or title   # drop " | Site" / ": Department of ..." suffix
-    for sel in DROP:
-        for t in soup.select(sel):
-            t.decompose()
     root_sel, root = next(((s, r) for s in MAIN if (r := soup.select_one(s))), ("(document)", soup))
+    for sel in DROP:
+        # Theme flags such as Divi's body class "et-tb-has-footer" are not footer elements.
+        for t in root.select(sel):
+            t.decompose()
 
     sections: list[Section] = []
-    path: list[tuple[int, str]] = []
+    path: list[tuple[int, str, str | None]] = []
     buf: list[str] = []
     term: list[str | None] = [None]
+
+    def section_department():
+        return next((owner for _, _, owner in reversed(path) if owner), None)
 
     def flush():
         txt = "\n".join(buf).strip()
         if txt:
-            heading = " > ".join(h for _, h in path)
-            sections.append(Section([h for _, h in path], txt, term[0],
-                                    course_codes=course_codes(heading + " " + txt)))
+            heading = " > ".join(h for _, h, _ in path)
+            sections.append(Section([h for _, h, _ in path], txt, term[0],
+                                    course_codes=course_codes(heading + " " + txt),
+                                    department=section_department()))
         buf.clear()
 
-    def set_heading(level: int, text: str):
+    def set_heading(level: int, text: str, department: str | None = None):
         flush()
         while path and path[-1][0] >= level:
             path.pop()
-        path.append((level, text))
+        path.append((level, text, department))
         if (t := parse_term(text)) is not None:
             term[0] = t
         elif level <= 2:
@@ -159,7 +165,11 @@ def parse_html(url: str, html: str | bytes) -> ParsedPage:
                 continue
             if ch.name in HEADINGS:
                 if t := norm(ch.get_text(" ")):
-                    set_heading(HEADINGS[ch.name], t)
+                    owner = ch.get("data-askiisc-department") if tagged_departments else None
+                    if owner:
+                        from .departments import validate_codes
+                        validate_codes([owner])
+                    set_heading(HEADINGS[ch.name], t, owner)
             elif ch.name == "table":
                 header, rows = _table_rows(ch)
                 flush()
@@ -170,8 +180,8 @@ def parse_html(url: str, html: str | bytes) -> ParsedPage:
                         text = " | ".join(cells)
                     codes = course_codes(cells[0] if cells else "")
                     label = (path[-1][1] if path else title) + (f" | {cells[0]}" if codes else "")
-                    sections.append(Section([h for _, h in path[:-1]] + [label], text, term[0], "row",
-                                            course_codes=codes or course_codes(text)))
+                    sections.append(Section([h for _, h, _ in path[:-1]] + [label], text, term[0], "row",
+                                            course_codes=codes or course_codes(text), department=section_department()))
             elif ch.name in BLOCKS and not ch.find(["table"] + list(HEADINGS)):
                 t = norm(ch.get_text(" "))
                 if not t:

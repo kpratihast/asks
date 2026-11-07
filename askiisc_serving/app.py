@@ -336,6 +336,15 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             return payload
 
         # Early abstention: the evidence is not good enough to answer from, so the model is not called.
+        department_guidance = {
+            "clarify": ("department_required", "Which IISc department or programme offering do you mean?"),
+            "narrow_comparison": ("too_many_departments", "Please compare up to three IISc departments at a time."),
+        }.get(trace.get("department_status"))
+        if department_guidance:
+            reason, answer = department_guidance
+            payload = finish({"status": "guidance", "reason": reason, "answer": answer, "citations": []})
+            await slot.release()
+            return _sse_single(payload) if q.stream else payload
         if q.mode != "none" and (not hits or trace.get("evidence_sufficient") is False):
             payload = finish({"status": "abstained", "reason": "insufficient_evidence", "answer": ABSTAIN,
                               "citations": [], "sources_that_may_help": excerpt_fallback(hits)})
@@ -351,7 +360,9 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             raise
         timings["prompt_ms"] = round((time.perf_counter() - t1) * 1000, 2)
 
-        if budget.get("required_sources", 0) > budget.get("required_selected", 0):
+        requested_departments = set(trace.get("departments") or [])
+        missing_department = bool(requested_departments - {hit.get("department") for hit in selected})
+        if missing_department or budget.get("required_sources", 0) > budget.get("required_selected", 0):
             payload = finish({"status": "abstained", "reason": "insufficient_context_budget",
                               "answer": ABSTAIN, "citations": [], "budget": budget,
                               "sources_that_may_help": excerpt_fallback(hits)})
@@ -363,7 +374,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                                      media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
         try:
-            return await _answer(app, q, messages, selected, budget, hits, timings, finish)
+            return await _answer(app, q, messages, selected, budget, hits, timings, finish, trace)
         finally:
             await slot.release()
 
@@ -415,8 +426,19 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     return app
 
 
+def _verify_answer(answer, selected, mode, trace):
+    check = verify_connected(answer, selected) if mode == "full" else verify(answer, len(selected))
+    requested = set(trace.get("departments") or [])
+    if len(requested) > 1 and not check["abstained"]:
+        cited = {hit.get("department") for hit in selected if hit["prompt_marker"] in check["used"]}
+        missing = sorted(requested - cited)
+        if missing:
+            check.update(ok=False, missing_department_citations=missing)
+    return check
+
+
 # ---------------------------------------------------------------------- answering
-async def _answer(app, q, messages, selected, budget, hits, timings, finish) -> dict:
+async def _answer(app, q, messages, selected, budget, hits, timings, finish, trace) -> dict:
     s = app.state.settings
     gen = app.state.generator
     try:
@@ -425,17 +447,18 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish) -> 
         return finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.", "answer": None,
                        "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
     attempts = 1
-    check = verify_connected(answer, selected) if q.mode == "full" else verify(answer, len(selected))
+    check = _verify_answer(answer, selected, q.mode, trace)
     if not check["ok"] and q.mode != "none" and s.regenerate_on_bad_citations:
         retry = messages + [{"role": "assistant", "content": answer},
                             {"role": "user", "content": "Your answer did not cite the evidence correctly. Answer "
-                             f"again using only markers S1 to S{len(selected)} after each claim, or reply "
+                             f"again using only markers S1 to S{len(selected)} after each claim. "
+                             "For a comparison, cite evidence for each requested department. Otherwise reply "
                              f"exactly \"{ABSTAIN}\" if the evidence does not contain the answer."}]
         try:
             answer, meta2 = await gen.complete(retry)
             meta = _merge_meta(meta, meta2)
             attempts = 2
-            check = verify_connected(answer, selected) if q.mode == "full" else verify(answer, len(selected))
+            check = _verify_answer(answer, selected, q.mode, trace)
         except GenerationUnavailable as e:
             return finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.",
                            "answer": None, "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
@@ -503,7 +526,7 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
                                        "budget": budget, "replace_streamed_text": True}))
             return
         answer = "".join(parts).strip()
-        check = verify_connected(answer, selected) if q.mode == "full" else verify(answer, len(selected))
+        check = _verify_answer(answer, selected, q.mode, trace)
         timings.update({k: meta.get(k) for k in ("ttft_ms", "generation_ms")})
         base = {"usage": meta.get("usage"), "budget": budget, "attempts": 1, "verification": check}
         if q.mode == "none":

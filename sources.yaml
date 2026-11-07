@@ -1,6 +1,7 @@
 # Pages for the retrieval dev corpus. Fetched ONCE by `python -m askiisc_retrieval.cli fetch`
 # and saved under data/raw/, so every later run works offline on the same snapshot.
-# Add lab / faculty pages at the bottom (doc_type: research). Keep the list small (< ~20 pages).
+# Add reviewed pages with an explicit department code from config/departments.yaml.
+# Default scope is CDS. Enable others with ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE.
 department: CDS
 pages:
   - {url: "https://cds.iisc.ac.in/courses/descriptions/",               doc_type: catalogue,  scope: public}
@@ -12,6 +13,9 @@ pages:
   - {url: "https://cds.iisc.ac.in/people-all/faculty/",                 doc_type: people,     scope: public}
   - {url: "https://cds.iisc.ac.in/research-new/data-management-computing-and-analytics/", doc_type: research, scope: public}
   - {url: "https://cds.iisc.ac.in/research-new/software-and-runtime-systems/",            doc_type: research, scope: public}
+  # Public pilot sources. Keep current-cycle notices separate from standing programme pages.
+  - {url: "https://www.csa.iisc.ac.in/academics-all/prospective-students-resources/", department: CSA, doc_type: admissions, scope: public}
+  - {url: "https://ece.iisc.ac.in/general-info-mtech-ece/", department: ECE, doc_type: admissions, scope: public}
 
 # Bounded crawl of the CDS site (added 2026-10-08). The corpus is defined by the site's own links, not by
 # any question set. Pages listed above keep their doc_type and are never re-downloaded. Pages the crawl

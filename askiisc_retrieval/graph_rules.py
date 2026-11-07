@@ -8,7 +8,7 @@ from .contract import ChunkPayload
 from .parse import course_codes
 from .stores import Edge
 
-GRAPH_RULES_VERSION = "rules-v4-policies"   # v3: source-backed teaching-slot and examination-slot relationships
+GRAPH_RULES_VERSION = "rules-v5-departments"   # v3: source-backed teaching-slot and examination-slot relationships
 
 PREREQ_RE = re.compile(r"pre-?\s?requisites?\s*:?\s*(.+?)(?:\.\s|$)", re.I | re.S)
 TITLES = re.compile(r"^(prof(essor)?\.?|dr\.?|mr\.?|ms\.?|mrs\.?)\s+", re.I)
@@ -78,7 +78,7 @@ def edges_for_chunk(c: ChunkPayload) -> list[Edge]:
 
     def add(src, rel, dst, term=None):
         if src and dst and src != dst:
-            edges.append(Edge(src, rel, dst, (c.chunk_id,), c.version_id, c.access_scope, term))
+            edges.append(Edge(src, rel, dst, (c.chunk_id,), c.version_id, c.access_scope, term, department=c.department))
 
     if c.doc_type == "schedule" and c.course_codes:
         f = _fields(c.text)

@@ -71,7 +71,7 @@ def hits_from_result(d: dict, now_term: str | None = None) -> list[dict]:
             status = "current"
         m = INSTRUCTOR_RE.search(text)
         hits.append({
-            "access_scope": c.get("access_scope"),
+            "access_scope": c.get("access_scope"), "department": c.get("department", ""),
             "marker": c["marker"], "title": c.get("title", ""), "section": c.get("section_heading", ""),
             "url": c.get("source_url", ""), "version_id": c.get("version_id"), "chunk_ids": c.get("chunk_ids", []),
             "academic_term": term, "academic_year": academic_year(term) or "not term-specific",
@@ -94,6 +94,7 @@ def _filter_year(hits: list[dict], year: str | None) -> list[dict]:
 
 def _trace(d: dict, mode: str) -> dict:
     return {"mode": mode, "snapshot_id": d.get("snapshot_id"),
+            "departments": d.get("departments", []), "department_status": d.get("department_status"),
             "connection_status": d.get("connection_status"), "policy_trace": d.get("policy_trace", {}), "graph_proofs": d.get("graph_proofs", []), "target_term": d.get("target_term"),
             "evidence_sufficient": d.get("evidence_sufficient"), "rerank_top": d.get("rerank_top"),
             "degraded": d.get("degraded", False), "degraded_reason": d.get("degraded_reason"),
@@ -175,7 +176,8 @@ class RemoteRetrieval:
         for passage in d.get('passages', []):
             citation = citations.get(passage.get('marker'))
             if (citation is None or passage.get('access_scope') != citation['access_scope']
-                    or passage.get('chunk_id') not in citation.get('chunk_ids', [])):
+                    or passage.get('chunk_id') not in citation.get('chunk_ids', [])
+                    or passage.get('department', '') != citation.get('department', '')):
                 raise RetrievalUnavailable('Remote passage provenance does not match its citation')
         if pinned and d.get("snapshot_id") != pinned:
             raise SnapshotMismatch(f"pinned snapshot {pinned} is not active (active: {d.get('snapshot_id')})")

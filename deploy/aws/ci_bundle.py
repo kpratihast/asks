@@ -9,7 +9,7 @@ DEPLOY_NAMES={'awsctl.py','release_lib.py','host.py','runtime.py','model_config.
  'deploy_latest.py','iam_bootstrap.py','render_stack.py','bootstrap.sh','stack.json','requirements.in',
  'requirements.lock','README.md','runtime.example.json','deployer-policy.example.json',
  'model-profiles.example.json','ci.py','ci_bundle.py','ci_host.py','ci_setup.py','GITHUB_DEPLOYMENT.md'}
-CONFIG_NAMES={'faculty_directory.json','restricted_documents.json'}
+CONFIG_NAMES={'faculty_directory.json','restricted_documents.json','departments.yaml'}
 
 
 def allowed(name):

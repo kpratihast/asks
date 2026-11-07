@@ -6,6 +6,8 @@ import html
 import json
 import os
 import re
+
+from .departments import DEFAULT, SHARED, mentioned, validate_codes
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +27,7 @@ class DocumentCatalog:
             ids.add(d['id'])
             if d['access_scope'] not in ('student', 'faculty'):
                 raise ValueError('Private documents need an explicit student or faculty access_scope')
+            validate_codes([d.get('department', DEFAULT)])
             if d.get('doc_type') not in ('schedule', 'calendar', 'policy', 'page'):
                 raise ValueError('Invalid private document type')
             for p in d.get('gate_patterns', []):
@@ -43,9 +46,11 @@ class DocumentCatalog:
     def matching(self, question):
         from .query_analysis import public_entrance_exam_context
         entrance = public_entrance_exam_context(question)
+        departments = mentioned(question)
         years = set(re.findall(r'\b20\d{2}\b', question))
         return [d for d in self.documents
-                if not (entrance and d.get('query_topic') in ('course_schedule', 'course_examination'))
+                if (not departments or d.get('department', DEFAULT) in (*departments, SHARED))
+                and not (entrance and d.get('query_topic') in ('course_schedule', 'course_examination'))
                 and (not years or not d.get('academic_term') or d['academic_term'][:4] in years)
                 and any(re.search(p, question, re.I) for p in d.get('gate_patterns', []))]
 
@@ -66,7 +71,7 @@ class DocumentCatalog:
             if hashlib.sha256(extracted.read_bytes()).hexdigest() != d['extracted_sha256']:
                 raise ValueError(f'Private document {d["id"]} extraction changed; update its reviewed checksum.')
             out.append(PageInput('/v1/documents/' + d['id'], extracted.read_bytes(), d['doc_type'],
-                                 d['access_scope'], version_tag=checksum))
+                                 d['access_scope'], d.get('department', DEFAULT), version_tag=checksum))
         return out
 
 

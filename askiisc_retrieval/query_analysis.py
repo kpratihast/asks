@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from .config import current_term
+from .departments import mentioned
 from .parse import COURSE_RE, parse_term
 
 MONTH_YEAR = re.compile(r"\b(aug(?:ust)?|jan(?:uary)?|summer)[a-z]*\.?,?\s*(\d{4})\b|\b(\d{4})\s*(aug(?:ust)?|jan(?:uary)?|summer)", re.I)
@@ -40,6 +41,8 @@ class QueryInfo:
     target_term: str                 # explicit term, else the current one
     wants_people: bool = False       # asks for a person or lab -> people pass (see PEOPLE_INTENT)
 
+    departments: tuple[str, ...] = ()
+
     @property
     def term_is_explicit(self) -> bool:
         return self.explicit_term is not None
@@ -60,7 +63,7 @@ def analyse(query: str, today_term: str | None = None) -> QueryInfo:
         term = previous_term(now)
     if term is None and THIS_TERM.search(query):
         term = now
-    return QueryInfo(query, codes, term, term or now, bool(PEOPLE_INTENT.search(query)))
+    return QueryInfo(query, codes, term, term or now, bool(PEOPLE_INTENT.search(query)), mentioned(query))
 
 
 

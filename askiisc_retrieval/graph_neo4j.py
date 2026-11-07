@@ -36,6 +36,7 @@ import logging
 import re
 import time
 from collections import Counter
+from dataclasses import replace
 from .contract import SCOPES
 from typing import Callable
 
@@ -149,10 +150,11 @@ class Neo4jGraphStore:
     """GraphStore over Neo4j (read-through cache). `fetch` returns EDGE_QUERY records."""
 
     def __init__(self, fetch: Callable[[], list[dict]], ttl_s: float = 300.0, label: str = "neo4j",
-                 supplement: Callable[[], list[Edge]] | None = None):
+                 supplement: Callable[[], list[Edge]] | None = None, evidence_chunks=None):
         """`supplement`: extra edges (rule-based, from the ingestion chunks) merged into what Neo4j
         returns, for relations the ingestion graph does not have yet. Neo4j edges win on duplicates."""
         self.fetch, self.ttl, self.label, self.supplement = fetch, ttl_s, label, supplement
+        self.evidence_chunks = evidence_chunks
         self._inner: JsonGraphStore | None = None
         self._at = 0.0
         self.error: str | None = None
@@ -170,6 +172,17 @@ class Neo4jGraphStore:
             self._at = time.monotonic()                            # do not hammer a down server
             return
         edges, aliases, skipped = edges_from_records(records)
+        if self.evidence_chunks is not None:
+            owners = {chunk.chunk_id: chunk.department for chunk in
+                      self.evidence_chunks(list({cid for edge in edges for cid in edge.chunk_ids}))}
+            scoped_edges = []
+            for edge in edges:
+                departments = {owners.get(cid) for cid in edge.chunk_ids}
+                if len(departments) == 1 and None not in departments and "" not in departments:
+                    scoped_edges.append(replace(edge, department=next(iter(departments))))
+                else:
+                    skipped["no consistent evidence department"] += 1
+            edges = scoped_edges
         n_neo4j, added = len(edges), 0
         neo4j_rels = dict(Counter(e.rel for e in edges))
         if self.supplement is not None and not {"WORKS_ON", "HEADS"} & set(neo4j_rels):   # only for v2 graphs
@@ -203,8 +216,8 @@ class Neo4jGraphStore:
     def entities_of_chunks(self, chunk_ids):
         return self._g().entities_of_chunks(chunk_ids)
 
-    def find_people(self, text):
-        return self._g().find_people(text)
+    def find_people(self, text, **kwargs):
+        return self._g().find_people(text, **kwargs)
 
     @property
     def edges(self):

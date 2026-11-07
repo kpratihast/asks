@@ -66,8 +66,10 @@ def links_in(html: bytes | str, base: str) -> list[str]:
 
 
 def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client, raw_name,
-          delay_s: float = 0.5, respect_robots: bool = True, log=print) -> list[dict]:
+          delay_s: float = 0.5, respect_robots: bool = True, log=print, *, department: str | None = None) -> list[dict]:
     home = urlparse(normalise(seeds[0])).netloc
+    if any(urlparse(normalise(seed)).netloc != home for seed in seeds):
+        raise ValueError("Use a separate crawl group for each department host")
     robots = None
     if respect_robots:
         robots = urllib.robotparser.RobotFileParser()
@@ -114,6 +116,8 @@ def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client
             if r.status_code != 200 or "html" not in r.headers.get("content-type", "html"):
                 continue
             final = normalise(str(r.url))
+            if not allowed(final)[0]:
+                continue
             if final != url and final in seen:          # redirect to a page we already have
                 continue
             body = r.content
@@ -124,5 +128,14 @@ def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client
             for link in links_in(body, url):
                 if link not in seen:
                     queue.append((link, depth + 1))
-    (RAW_DIR / CRAWL_INDEX).write_text(json.dumps(pages, indent=1), encoding="utf-8")
+    if department:
+        for page in pages:
+            page["department"] = department
+    index = RAW_DIR / CRAWL_INDEX
+    previous = json.loads(index.read_text(encoding="utf-8")) if index.exists() and department else []
+    def belongs_to_host(page):
+        host = urlparse(page["url"]).netloc
+        return host == home or host.endswith("." + home)
+    retained = [page for page in previous if not belongs_to_host(page)]
+    index.write_text(json.dumps(retained + pages, indent=1), encoding="utf-8")
     return pages

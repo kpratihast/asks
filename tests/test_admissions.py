@@ -57,7 +57,7 @@ def test_rebuild_retains_cached_crawl_and_admissions(tmp_path,monkeypatch):
     for url in (seed,crawl,updated):(raw/fetch.raw_name(url)).write_text('<main>Original content</main>')
     (raw/'crawl.json').write_text(json.dumps([{'url':crawl,'doc_type':'research'},{'url':updated,'doc_type':'admissions'}]))
     monkeypatch.setattr(config,'RAW_DIR',raw)
-    monkeypatch.setattr(fetch,'load_sources',lambda:{'pages':[{'url':seed,'doc_type':'page','scope':'public'}],'crawl':True})
+    monkeypatch.setattr(fetch,'load_sources',lambda:{'pages':[{'url':seed,'doc_type':'page','scope':'public'}],'department':'CDS','crawls':[{'department':'CDS','seeds':['https://example.test/']}]})
     monkeypatch.setattr(admissions,'cached_pages',lambda *args:([ingest_stub.PageInput(updated,'Updated content','admissions','public','IISc')],{}))
     monkeypatch.setattr(DocumentCatalog,'page_inputs',lambda self:[])
     pages=ingest_stub.load_page_inputs(include_fixtures=False)

@@ -85,7 +85,7 @@ def main():
     finally:store.close()
     new=[ChunkPayload(**json.loads(line)) for line in (out/'chunks.jsonl').read_text().splitlines() if line.strip()]
     combined=kept+new;versions=frozenset(c.version_id for c in combined)
-    snap=Snapshot('snap-'+h('|'.join(sorted(versions))+emb.model_id+GRAPH_RULES_VERSION,10),emb.model_id,GRAPH_RULES_VERSION,versions)
+    snap=Snapshot('snap-'+h('|'.join(sorted(versions))+emb.model_id+GRAPH_RULES_VERSION,10),emb.model_id,GRAPH_RULES_VERSION,versions,tuple(sorted({c.department for c in combined})))
     JsonSnapshotProvider.write(out/'snapshot.json',snap);JsonGraphStore(build_edges(combined)).save(out/'graph.json')
     (out/'chunks.jsonl').write_text(''.join(json.dumps(c.to_dict(),ensure_ascii=False)+'\n' for c in combined))
     if (base/'raw').exists():shutil.copytree(base/'raw',out/'raw')

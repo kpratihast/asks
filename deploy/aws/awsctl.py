@@ -36,6 +36,8 @@ def package(root,data,out,model_dir=None,release_id=None):
             if p.is_file() and p.name in DEPLOY_FILES:
                 copy(p,tree/'deploy/aws'/p.name)
         for name in ['faculty_directory.json','restricted_documents.json']:copy(root/'config'/name,tree/'config'/name)
+        if (root/'config/departments.yaml').is_file():
+            copy(root/'config/departments.yaml',tree/'config/departments.yaml')
         for doc in private['documents']:
             for key,digest in [('original','sha256'),('extracted','extracted_sha256')]:
                 source=(root/doc[key]).resolve()

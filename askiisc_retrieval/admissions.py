@@ -7,8 +7,7 @@ from __future__ import annotations
 import html,re
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup,Tag
-
-CDS = re.compile(r'computational\s*(?:&|and)\s*data\s*sciences?',re.I)
+from .departments import DEFAULT, SHARED, label, mentioned, source_departments
 FOOTER=re.compile(r'^(?:recent news|contact us|shortcuts|general information|arting science|campus life|did you know\??|artsy research)$',re.I)
 
 def text(node):return re.sub(r'\s+',' ',node.get_text(' ',strip=True)).strip()
@@ -50,14 +49,23 @@ def fees_table(table):
             parts.append('<p>'+html.escape(row[0]+': '+row[column])+'</p>')
     return ''.join(parts)
 
-def normalize_html(body,url,mode):
+def normalize_html(body,url,mode,departments=(DEFAULT,)):
+    def owner(value):
+        codes = mentioned(value)
+        return codes[0] if len(codes) == 1 and codes[0] in departments else None
+
+    def department_heading(code):
+        heading = main.new_tag("h2", attrs={"data-askiisc-department": code})
+        heading.string = f"{label(code)} ({code})"
+        return heading
+
     soup=BeautifulSoup(body,'lxml')
     main=soup.select_one('.col-md-9') if mode!='cds' else soup.select_one('.entry-content') or soup.select_one('main') or soup.body
     if main is None:raise ValueError('Admissions content container needs review')
     main=BeautifulSoup(str(main),'lxml')
     # Only department panels are scoped; common eligibility/selection panels remain complete.
-    found_cds=False
     if mode=='programmes':
+        found = False
         for listing in list(main.select('ul.resp-tabs-list')):
             panels=listing.find_next_sibling('div',class_='resp-tabs-container')
             if panels is None:raise ValueError('Admissions tabs need review')
@@ -65,32 +73,60 @@ def normalize_html(body,url,mode):
             labels=listing.find_all('li',recursive=False)
             department_panels=any('Discipline:' in text(tab) or 'Department/Centre/Unit:' in text(tab) for tab in tabs)
             if department_panels:
-                # The live M.Tech markup has an unwrapped Instrumentation panel, so
-                # positional label/tab pairing would associate the wrong programme.
-                kept=[tab for tab in tabs if CDS.search(text(tab)[:300])]
-                if any(CDS.search(text(label)) for label in labels) and not kept:
-                    raise ValueError('CDS programme panel missing; source format needs review')
-                found_cds = found_cds or bool(kept)
+                # Resolve the declared name from the content. Positions on this page can be wrong.
+                kept = {}
+                for tab in tabs:
+                    fields = re.split(
+                        r'\b(Discipline|Department/Centre/Unit|Programme\(s\)|Note|Intake|'
+                        r'Basic Qualification for Eligibility|Qualification with required GATE paper)\s*:',
+                        text(tab), flags=re.I)
+                    values = {key.casefold(): value.strip()
+                              for key, value in zip(fields[1::2], fields[2::2])}
+                    discipline = values.get("discipline", "")
+                    affiliation = values.get("department/centre/unit", discipline)
+                    # A joint offering needs an explicit mapping of all owners.
+                    if re.search(r"\b(?:jointly|joint programme)\b", affiliation, re.I):
+                        continue
+                    if code := owner(affiliation):
+                        kept[id(tab)] = (code, discipline)
+                expected = {code for label_tag in labels if (code := owner(text(label_tag)))}
+                missing = expected - {code for code, _ in kept.values()}
+                if missing:
+                    raise ValueError(f'{", ".join(sorted(missing))} programme panel missing; source format needs review')
+                found |= bool(kept)
                 for node in list(panels.children):
-                    if isinstance(node,Tag) and node not in kept:node.decompose()
-                for tab in kept:
-                    heading=main.new_tag('h2');heading.string='Computational and Data Sciences (CDS)';tab.insert(0,heading)
+                    if isinstance(node,Tag):
+                        if match := kept.get(id(node)):
+                            code, discipline = match
+                            heading = department_heading(code)
+                            if discipline:
+                                heading.string += f" — {discipline}"
+                            node.insert(0, heading)
+                        else:
+                            node.decompose()
             else:
                 if len(tabs)!=len(labels):raise ValueError('Admissions tab/label mismatch')
-                for label,tab in zip(labels,tabs):
-                    heading=main.new_tag('h2');heading.string=text(label);tab.insert(0,heading)
+                for label_tag,tab in zip(labels,tabs):
+                    heading=main.new_tag('h2');heading.string=text(label_tag);tab.insert(0,heading)
             listing.decompose()
-    if mode=='programmes':
-        if not found_cds:raise ValueError('No CDS programme panel found')
+        if not found:raise ValueError('No configured department programme panel found')
         # Empty headings above department tabs should not label the common rules.
         for heading in list(main.find_all(['h1','h2'])):
             if re.fullmatch(r'Ph\.?D\.? Science\s*\*?', text(heading), re.I):heading.decompose()
     if mode=='cfti':
-        if not any(CDS.search(text(h)) for h in main.find_all('h2')):raise ValueError('CFTI CDS panel missing')
-        active=True
-        for node in list((main.body or main).find('div',class_='col-md-9').children):
-            if isinstance(node,Tag) and node.name=='h2':active=bool(CDS.search(text(node)))
-            if not active:node.extract()
+        container = main.find('div',class_='col-md-9')
+        active, found = True, False
+        for node in list(container.children):
+            if isinstance(node,Tag) and node.name=='h2':
+                code = owner(text(node))
+                active = bool(code)
+                if code:
+                    node["data-askiisc-department"] = code
+                    found = True
+            if not active:
+                node.extract()
+        if not found:
+            raise ValueError('No configured CFTI department panel found')
     if mode=='fees':
         for i,table in enumerate(list(main.find_all('table'))):
             if i==0:
@@ -109,10 +145,15 @@ def normalize_html(body,url,mode):
                 p.decompose()
     if mode=='contacts':
         for table in main.find_all('table'):
-            rows=table.find_all('tr');kept=[]
-            for row in rows:
-                if CDS.search(text(row)):kept.append(str(row))
-            table.replace_with(BeautifulSoup('<h2>Computational and Data Sciences contact</h2>'+''.join('<p>'+html.escape(text(BeautifulSoup(row,'html.parser')) )+'</p>' for row in kept),'html.parser'))
+            for row in table.find_all('tr'):
+                for cell in row.find_all('td')[:2]:
+                    if code := owner(text(cell)):
+                        paragraph = main.new_tag('p')
+                        paragraph.string = text(row)
+                        table.insert_before(department_heading(code))
+                        table.insert_before(paragraph)
+                        break
+            table.decompose()
     if mode=='faq':
         in_ug=False
         for p in list(main.find_all('p')):
@@ -164,6 +205,8 @@ def cached_pages(profile,cache):
     limits=profile['limits'];specs=profile['sources']
     if len({spec['url'] for spec in specs})!=len(specs):raise ValueError('Duplicate source URL')
     if len(specs)>limits['sources']:raise ValueError('Source boundary exceeded')
+    departments = {*source_departments(), SHARED}
+    specs = [spec for spec in specs if spec.get('department', SHARED) in departments]
     records={d['url']:d for d in json.loads((cache/'download.json').read_text())}
     pages=[];report=[];total=0;pdf_pages=0;estimated=0
     (cache/'normalized').mkdir(exist_ok=True)
@@ -181,13 +224,14 @@ def cached_pages(profile,cache):
             pdf_pages+=len(PdfReader(path).pages)
             if pdf_pages>limits['pdf_pages']:raise ValueError('PDF page boundary exceeded')
             body=pdf_html(path,spec['label'],max_pages=limits['pdf_pages'])
-        else:body=normalize_html(path.read_bytes(),spec['url'],spec['mode'])
-        parsed=parse_html(spec['url'],body)
+        else:body=normalize_html(path.read_bytes(),spec['url'],spec['mode'],departments)
+        parsed=parse_html(spec['url'],body,tagged_departments=spec['department']==SHARED)
         if sum(len(s.text) for s in parsed.sections)<MIN_CONTENT_CHARS:raise ValueError('Empty source needs review: '+spec['url'])
         chunks=chunk_page(parsed,version_id='preview',document_id='preview',scope='public',doc_type='admissions',department=spec['department'],embedding_model='preview')
         estimated+=len(chunks)
         if estimated>limits['new_chunks']:raise ValueError('Chunk boundary exceeded: split at programme/source boundary')
         (cache/'normalized'/(name+'.html')).write_text(body)
-        pages.append(PageInput(spec['url'],body,'admissions','public',spec['department']))
+        pages.append(PageInput(spec['url'],body,'admissions','public',spec['department'],
+                               tagged_departments=spec['department']==SHARED))
         report.append({**spec,'status':'included','sha256':rec['sha256'],'sections':len(parsed.sections),'estimated_chunks':len(chunks),'words':sum(len(s.text.split()) for s in parsed.sections)})
     return pages,{'sources':report,'raw_bytes':total,'pdf_pages':pdf_pages,'estimated_new_chunks':estimated,'boundary':profile['boundary']}

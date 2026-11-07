@@ -76,7 +76,8 @@ def _graph(store=None):
     except Exception as e:                                    # driver missing / bad URI
         print(f"Graph: unavailable ({type(e).__name__}: {e})", file=sys.stderr)
         return None
-    g = Neo4jGraphStore(fetch, ttl_s=config.GRAPH_TTL_S, supplement=_rule_supplement(store))
+    g = Neo4jGraphStore(fetch, ttl_s=config.GRAPH_TTL_S, supplement=_rule_supplement(store),
+                        evidence_chunks=store.get if store is not None else None)
     print(f"Graph: neo4j {config.NEO4J_URI} {g.stats or g.error}", file=sys.stderr)
     return g
 

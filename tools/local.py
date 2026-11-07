@@ -1,4 +1,4 @@
-"""Run public CDS chat against an existing OpenAI-compatible model server, without Docker."""
+"""Run public IISc chat against an existing OpenAI-compatible model server, without Docker."""
 from __future__ import annotations
 
 import argparse
@@ -84,7 +84,7 @@ def prepare(refresh=False, rebuild=False):
             except httpx.HTTPError as exc:
                 print(f"Unavailable: {pg['url']} ({type(exc).__name__})", file=sys.stderr)
     if not pages:
-        raise SystemExit("No CDS pages could be fetched; check network access and retry.")
+        raise SystemExit("No configured source pages could be fetched; check network access and retry.")
     old_manifest = config.RAW_DIR / "index.json"
     previous = json.loads(old_manifest.read_text()) if old_manifest.exists() else {}
     old_manifest.write_text(json.dumps({**previous, **manifest}, indent=2))
@@ -108,7 +108,7 @@ def prepare(refresh=False, rebuild=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prepare", action="store_true", help="Fetch real CDS pages and build the local index")
+    parser.add_argument("--prepare", action="store_true", help="Fetch configured source pages and build the local index")
     parser.add_argument("--refresh", action="store_true", help="Refetch/rebuild (stop serving first)")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild cached pages and classified private documents (stop serving first)")
     parser.add_argument("--auth", choices=("on", "off"), help="Enable OTP/roles, or disable sign-in and serve public content only")
@@ -125,7 +125,7 @@ def main():
         raise SystemExit("No local index yet. Run ./run-local.sh --prepare first.")
     from askiisc_serving.app import create_app
     import uvicorn
-    print(f"CDS chat: http://127.0.0.1:{args.port} | model: {os.environ['VLLM_URL']}", flush=True)
+    print(f"Ask IISc: http://127.0.0.1:{args.port} | model: {os.environ['VLLM_URL']}", flush=True)
     uvicorn.run(create_app(), host="127.0.0.1", port=args.port, workers=1)
 
 

@@ -15,6 +15,7 @@ class Snapshot:
     embedding_model: str
     graph_version: str | None
     active_version_ids: frozenset[str]
+    departments: tuple[str, ...] = ()
 
 
 class SnapshotProvider(Protocol):
@@ -28,13 +29,14 @@ class JsonSnapshotProvider:
     def active(self) -> Snapshot:
         d = json.loads(self.path.read_text(encoding="utf-8"))
         return Snapshot(d["snapshot_id"], d["embedding_model"], d.get("graph_version"),
-                        frozenset(d["active_version_ids"]))
+                        frozenset(d["active_version_ids"]), tuple(d.get("departments", ())))
 
     @staticmethod
     def write(path: Path, snap: Snapshot) -> None:
         path.write_text(json.dumps({"snapshot_id": snap.snapshot_id, "embedding_model": snap.embedding_model,
                                     "graph_version": snap.graph_version,
-                                    "active_version_ids": sorted(snap.active_version_ids)}, indent=2),
+                                    "active_version_ids": sorted(snap.active_version_ids),
+                                    "departments": list(snap.departments)}, indent=2),
                         encoding="utf-8")
 
 

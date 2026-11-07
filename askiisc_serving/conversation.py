@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 HELP_REPLY = (
-    "I can help with IISc and CDS admissions, courses, research and department information. "
+    "I can help with IISc admissions, courses, research and department information. "
     "Please ask a question about one of these topics."
 )
 

@@ -54,7 +54,7 @@ def main():
         active = frozenset(c.version_id for c in all_chunks if c.version_id in old.active_version_ids or c in private)
         graph = JsonGraphStore(build_edges(all_chunks)); graph.save(target / 'graph.json')
         snapshot = Snapshot('snap-' + h('|'.join(sorted(active)) + emb.model_id + GRAPH_RULES_VERSION,10), emb.model_id,
-                            GRAPH_RULES_VERSION, active)
+                            GRAPH_RULES_VERSION, active, tuple(sorted({c.department for c in all_chunks if c.version_id in active})))
         JsonSnapshotProvider.write(target / 'snapshot.json', snapshot)
         (target / 'chunks.jsonl').write_text(''.join(json.dumps(c.to_dict(),ensure_ascii=False)+'\n' for c in all_chunks))
         report = {'snapshot':snapshot.snapshot_id, 'preserved_chunks':len(public),'private_chunks':len(private),

@@ -156,7 +156,7 @@ class QdrantStore:
             return
         self.c.create_collection(self.col, vectors_config=m.VectorParams(size=self.dim, distance=m.Distance.COSINE))
         if self.server:                               # payload indexes only exist on the server
-            for f in ("version_id", "access_scope", "embedding_model", "course_codes", "academic_term"):
+            for f in ("version_id", "access_scope", "embedding_model", "course_codes", "academic_term", "department"):
                 self.c.create_payload_index(self.col, f, m.PayloadSchemaType.KEYWORD)
 
     def reset(self):
@@ -175,7 +175,7 @@ class QdrantStore:
         for i in range(0, len(pts), 256):
             self.c.upsert(self.col, points=pts[i:i + 256])
 
-    def _filter(self, version_ids, scopes, embedding_model, course_codes=None, doc_types=None):
+    def _filter(self, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *, departments=None):
         m = self.m
         must = [m.FieldCondition(key="version_id", match=m.MatchAny(any=sorted(version_ids))),
                 m.FieldCondition(key="access_scope", match=m.MatchAny(any=list(scopes))),
@@ -184,12 +184,14 @@ class QdrantStore:
             must.append(m.FieldCondition(key="course_codes", match=m.MatchAny(any=list(course_codes))))
         if doc_types:
             must.append(m.FieldCondition(key="doc_type", match=m.MatchAny(any=list(doc_types))))
+        if departments:
+            must.append(m.FieldCondition(key="department", match=m.MatchAny(any=list(departments))))
         return m.Filter(must=must)
 
-    def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None):
+    def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *, departments=None):
         res = self.c.query_points(self.col, query=vector, limit=k, with_payload=True,
                                   query_filter=self._filter(version_ids, scopes, embedding_model, course_codes,
-                                                            doc_types))
+                                                            doc_types, departments=departments))
         return [(ChunkPayload(**p.payload), float(p.score)) for p in res.points]
 
     def document_chunks(self, source_url, version_ids, scopes, embedding_model):
@@ -229,6 +231,7 @@ class Edge:
     scope: str
     academic_term: str | None = None
     qualifiers: tuple[tuple[str, str], ...] = ()
+    department: str | None = None
 
 
 @dataclass(frozen=True)
@@ -248,9 +251,10 @@ def _term_key(term: str) -> tuple[int, int]:
 
 class GraphStore(Protocol):
     def expand(self, seeds: list[str], version_ids: frozenset[str], scopes: list[str], hops: int,
-               limit: int, *, target_term: str, explicit: bool, now_term: str) -> list[GraphHit]: ...
+               limit: int, *, target_term: str, explicit: bool, now_term: str,
+               departments: tuple[str | None, ...] | None = None) -> list[GraphHit]: ...
     def entities_of_chunks(self, chunk_ids: list[str]) -> list[str]: ...
-    def find_people(self, text: str) -> list[str]: ...
+    def find_people(self, text: str, *, departments=None) -> list[str]: ...
 
 
 class JsonGraphStore:
@@ -317,7 +321,7 @@ class JsonGraphStore:
                     out.append(ent)
         return out
 
-    def find_people(self, text):
+    def find_people(self, text, *, departments=None):
         """Person nodes named in free text, via the same alias keys ('Y. Simmhan' == 'Yogesh Simmhan')."""
         self._check()
         toks = re.findall(r"[a-z]+", text.lower())
@@ -326,18 +330,24 @@ class JsonGraphStore:
             cands = self._people_by_surname.get(t)
             if not cands:
                 continue
+            if departments is not None:
+                cands = {node for node in cands if any(e.department in departments for e in self._by_node[node])}
             if i > 0:                                   # prefer the one whose initial matches the previous word
                 narrowed = {c for c in cands if c.split(":")[1][0] == toks[i - 1][0]}
                 cands = narrowed or cands
             found.extend(sorted(c for c in cands if c not in found))
         return found
 
-    def _latest_term(self, course: str, now_term: str) -> str | None:
-        ok = [t for t in self._terms_of_course.get(course, ()) if _term_key(t) <= _term_key(now_term)]
+    def _latest_term(self, course: str, now_term: str, departments=None) -> str | None:
+        terms = self._terms_of_course.get(course, ())
+        if departments is not None:
+            terms = {e.academic_term for e in self._by_node[course]
+                     if e.src == course and e.department in departments and e.academic_term}
+        ok = [t for t in terms if _term_key(t) <= _term_key(now_term)]
         return max(ok, key=_term_key) if ok else None
 
     def expand(self, seeds, version_ids, scopes, hops, limit, *, target_term, explicit, now_term,
-               through_types=("Course", "Person")):
+               through_types=("Course", "Person"), departments=None):
         """Breadth-first from each seed, over edges in the active snapshot and the user's scopes.
 
         Term rules (term-bound edges only; timeless edges such as prerequisites always pass; future terms
@@ -361,11 +371,13 @@ class JsonGraphStore:
                     for e in self._by_node.get(node, ()):
                         if e.version_id not in version_ids or e.scope not in scopes:
                             continue
+                        if departments is not None and e.department not in departments:
+                            continue
                         t = e.academic_term
                         if t is not None and _term_key(t) > _term_key(now_term) and t != target_term:
                             continue                                    # future terms were not asked about
                         if explicit:
-                            current = t is None or t == self._latest_term(e.src, now_term)
+                            current = t is None or t == self._latest_term(e.src, now_term, departments)
                             evidence = t is None or t == target_term
                             if not (evidence or current):
                                 continue

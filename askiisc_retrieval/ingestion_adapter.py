@@ -254,7 +254,8 @@ class IngestionQdrantStore:
         return out
 
     # ---- search
-    def _native_filter(self, version_ids, scopes=None, embedding_model=None, course_codes=None, doc_types=None):
+    def _native_filter(self, version_ids, scopes=None, embedding_model=None, course_codes=None,
+                       doc_types=None, *, departments=None):
         """Every condition whose field the payload actually carries goes into the Qdrant filter."""
         m, have = self.m, self._native
         must = []
@@ -263,6 +264,8 @@ class IngestionQdrantStore:
                      m.FieldCondition(key="is_superseded", match=m.MatchValue(value=False))]
         if self.departments:
             must.append(m.FieldCondition(key="department", match=m.MatchAny(any=list(self.departments))))
+        if departments:
+            must.append(m.FieldCondition(key="department", match=m.MatchAny(any=list(departments))))
         if version_ids is not None:
             must.append(m.FieldCondition(key="version_id", match=m.MatchAny(any=sorted(version_ids))))
         if scopes is not None and "access_scope" in have:
@@ -275,7 +278,8 @@ class IngestionQdrantStore:
             must.append(m.FieldCondition(key="doc_type", match=m.MatchAny(any=list(doc_types))))
         return m.Filter(must=must) if must else None
 
-    def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None):
+    def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *,
+               departments=None):
         if version_ids is not None and not version_ids:
             return []                                              # nothing active: nothing to return
         derived = not {"access_scope", "embedding_model", "doc_type"} <= self._native
@@ -283,7 +287,7 @@ class IngestionQdrantStore:
         fetch = min(max(k * (8 if extra else 2), 50), 1000) if derived else k   # over-fetch only for derived
         res = self.c.query_points(self.col, query=vector, limit=fetch, with_payload=False,
                                   query_filter=self._native_filter(version_ids, scopes, embedding_model,
-                                                                   course_codes, doc_types))
+                                                                   course_codes, doc_types, departments=departments))
         out = []
         for p in res.points:
             c = self._by_point.get(str(p.id))
@@ -348,7 +352,11 @@ class IngestionSnapshotProvider:
         sid = "ing-" + hashlib.sha1(("|".join(sorted(ids)) + self.model).encode()).hexdigest()[:10]
         if self._snap is not None and sid != self._snap.snapshot_id:
             self.store.refresh()                                   # re-ingested: reload payloads too
-        self._snap, self._at = Snapshot(sid, self.model, self.graph_version, frozenset(ids)), time.monotonic()
+        departments = tuple(sorted({c.department for c in self.store.chunks()
+                                    if c.department and c.version_id in ids and c.embedding_model == self.model
+                                    and (not self.store.departments or c.department in self.store.departments)}))
+        self._snap = Snapshot(sid, self.model, self.graph_version, frozenset(ids), departments)
+        self._at = time.monotonic()
         return self._snap
 
 

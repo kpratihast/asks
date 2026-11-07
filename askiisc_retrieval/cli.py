@@ -185,8 +185,9 @@ def cmd_rebuild_graph(a):
     graph = JsonGraphStore(build_edges(chunks))
     graph.save(config.GRAPH_PATH)
     old = JsonSnapshotProvider(config.SNAPSHOT_PATH).active()
+    departments = tuple(sorted({c.department for c in chunks if c.version_id in old.active_version_ids}))
     JsonSnapshotProvider.write(config.SNAPSHOT_PATH, Snapshot(old.snapshot_id, old.embedding_model,
-                                                              GRAPH_RULES_VERSION, old.active_version_ids))
+                                                              GRAPH_RULES_VERSION, old.active_version_ids, departments))
     by_rel = Counter(e.rel for e in graph.edges)
     people = {n for e in graph.edges for n in (e.src, e.dst) if n.startswith("Person:")}
     print(f"{len(graph.edges)} edges from {len(chunks)} chunks ({GRAPH_RULES_VERSION}): "
