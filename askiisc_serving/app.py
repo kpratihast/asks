@@ -428,6 +428,18 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
 
 def _verify_answer(answer, selected, mode, trace):
     check = verify_connected(answer, selected) if mode == "full" else verify(answer, len(selected))
+    if mode != "none" and not check["abstained"]:
+        from askiisc_retrieval.web_links import EMAIL
+
+        addresses = {address.casefold() for address in EMAIL.findall(answer)}
+        if addresses:
+            cited = [hit for hit in selected if hit["prompt_marker"] in check["used"]]
+            supported = {address.casefold() for hit in cited for address in EMAIL.findall(hit["text"])}
+            matched = {address.casefold() for hit in cited for support in hit.get("graph_support", [])
+                       for address in support.get("contact_addresses", [])}
+            missing = addresses - (supported & matched if matched else supported)
+            if missing:
+                check.update(ok=False, unsupported_email=True)
     requested = set(trace.get("departments") or [])
     if len(requested) > 1 and not check["abstained"]:
         cited = {hit.get("department") for hit in selected if hit["prompt_marker"] in check["used"]}

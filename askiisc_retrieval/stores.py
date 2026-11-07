@@ -175,7 +175,7 @@ class QdrantStore:
         for i in range(0, len(pts), 256):
             self.c.upsert(self.col, points=pts[i:i + 256])
 
-    def _filter(self, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *, departments=None):
+    def _filter(self, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *, departments=None, source_urls=None):
         m = self.m
         must = [m.FieldCondition(key="version_id", match=m.MatchAny(any=sorted(version_ids))),
                 m.FieldCondition(key="access_scope", match=m.MatchAny(any=list(scopes))),
@@ -186,12 +186,14 @@ class QdrantStore:
             must.append(m.FieldCondition(key="doc_type", match=m.MatchAny(any=list(doc_types))))
         if departments:
             must.append(m.FieldCondition(key="department", match=m.MatchAny(any=list(departments))))
+        if source_urls:
+            must.append(m.FieldCondition(key="source_url", match=m.MatchAny(any=list(source_urls))))
         return m.Filter(must=must)
 
-    def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *, departments=None):
+    def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *, departments=None, source_urls=None):
         res = self.c.query_points(self.col, query=vector, limit=k, with_payload=True,
                                   query_filter=self._filter(version_ids, scopes, embedding_model, course_codes,
-                                                            doc_types, departments=departments))
+                                                            doc_types, departments=departments, source_urls=source_urls))
         return [(ChunkPayload(**p.payload), float(p.score)) for p in res.points]
 
     def document_chunks(self, source_url, version_ids, scopes, embedding_model):
@@ -311,6 +313,10 @@ class JsonGraphStore:
     def active_edges(self):
         self._check()
         return self.edges
+
+    def outgoing(self, node, relation):
+        self._check()
+        return [e for e in self._by_node.get(node, ()) if e.src == node and e.rel == relation]
 
     def entities_of_chunks(self, chunk_ids):
         self._check()

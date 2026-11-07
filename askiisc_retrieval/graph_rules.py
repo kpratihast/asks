@@ -8,7 +8,7 @@ from .contract import ChunkPayload
 from .parse import course_codes
 from .stores import Edge
 
-GRAPH_RULES_VERSION = "rules-v5-departments"   # v3: source-backed teaching-slot and examination-slot relationships
+GRAPH_RULES_VERSION = "rules-v6-hyperlinks"
 
 PREREQ_RE = re.compile(r"pre-?\s?requisites?\s*:?\s*(.+?)(?:\.\s|$)", re.I | re.S)
 TITLES = re.compile(r"^(prof(essor)?\.?|dr\.?|mr\.?|ms\.?|mrs\.?)\s+", re.I)
@@ -128,4 +128,6 @@ def build_edges(chunks: list[ChunkPayload]) -> list[Edge]:
         out.extend(edges_for_chunk(c))
     from .policy_graph import build_policy_edges
     out.extend(build_policy_edges(chunks))
+    from .link_graph import build_link_edges
+    out.extend(build_link_edges(chunks))
     return out

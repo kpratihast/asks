@@ -30,6 +30,7 @@ SYSTEM = (
     "4. If evidence items conflict, say so and cite both.\n"
     "Keep each fact attached to its exact degree programme, department, entry route and admission cycle. "
     "Never transfer duration, eligibility, selection, fees or dates to a different department, programme or cycle. "
+    "For email questions use the published address of the person asked about. Never infer an address from a name. "
     "Course M.Tech. and M.Tech. (Research) are separate programmes. A fact for one cannot fill a gap for the other. "
     "If the requested programme/cycle lacks the requested fact, abstain under rule 3.\n"
     "5. If evidence is marked as from a past term, say which term it is from.\n"
@@ -84,6 +85,10 @@ class Generator:
         proof = ""
         if any(s.get('proof_id') for s in h.get('graph_support', [])):
             proof = "\nVerified source connection: " + " ; ".join(h.get('graph_paths', []))
+            contacts = sorted({address for support in h.get("graph_support", [])
+                               for address in support.get("contact_addresses", [])})
+            if contacts:
+                proof += "\nPublished contact in this connection: " + ", ".join(contacts)
             proof += "\nRequired citations for the connected conclusion: " + h.get("connection_citations", "all supporting sources") + ". Include every listed marker after the answer."
         policy=[s for s in h.get('graph_support',[]) if s.get('policy_bundle_id')]
         policy_note=''

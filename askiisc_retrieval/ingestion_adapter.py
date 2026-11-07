@@ -226,6 +226,8 @@ class IngestionQdrantStore:
             course_codes=list(codes),
             embedding_model=pl.get("embedding_model") or reg_model or self.default_model,
             ordinal=_ordinal(pl),
+            links=pl.get("links") or [],
+            contacts=pl.get("contacts") or [],
         )
 
     @property
@@ -255,7 +257,7 @@ class IngestionQdrantStore:
 
     # ---- search
     def _native_filter(self, version_ids, scopes=None, embedding_model=None, course_codes=None,
-                       doc_types=None, *, departments=None):
+                       doc_types=None, *, departments=None, source_urls=None):
         """Every condition whose field the payload actually carries goes into the Qdrant filter."""
         m, have = self.m, self._native
         must = []
@@ -276,10 +278,12 @@ class IngestionQdrantStore:
             must.append(m.FieldCondition(key="course_codes", match=m.MatchAny(any=list(course_codes))))
         if doc_types and "doc_type" in have:
             must.append(m.FieldCondition(key="doc_type", match=m.MatchAny(any=list(doc_types))))
+        if source_urls:
+            must.append(m.FieldCondition(key="source_url", match=m.MatchAny(any=list(source_urls))))
         return m.Filter(must=must) if must else None
 
     def search(self, vector, k, version_ids, scopes, embedding_model, course_codes=None, doc_types=None, *,
-               departments=None):
+               departments=None, source_urls=None):
         if version_ids is not None and not version_ids:
             return []                                              # nothing active: nothing to return
         derived = not {"access_scope", "embedding_model", "doc_type"} <= self._native
@@ -287,7 +291,7 @@ class IngestionQdrantStore:
         fetch = min(max(k * (8 if extra else 2), 50), 1000) if derived else k   # over-fetch only for derived
         res = self.c.query_points(self.col, query=vector, limit=fetch, with_payload=False,
                                   query_filter=self._native_filter(version_ids, scopes, embedding_model,
-                                                                   course_codes, doc_types, departments=departments))
+                                                                   course_codes, doc_types, departments=departments, source_urls=source_urls))
         out = []
         for p in res.points:
             c = self._by_point.get(str(p.id))

@@ -52,7 +52,8 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
                            "(the real content is probably in a linked PDF/iframe; tell the ingestion team)"})
             continue
         ownership = "|".join(f"{s.heading}:{s.department or p.department}" for s in parsed.sections)
-        version_id = h(f"{p.url}|{h(body)}|{p.version_tag}|scope:{p.scope}|{h(ownership)}")
+        links = json.dumps([s.links for s in parsed.sections], ensure_ascii=False)
+        version_id = h(f"{p.url}|{h(body)}|{p.version_tag}|scope:{p.scope}|{h(ownership)}|{h(links)}")
         chunks = chunk_page(parsed, version_id=version_id, document_id=h(p.url, 12), scope=p.scope,
                             doc_type=p.doc_type, department=p.department, embedding_model=embedder.model_id)
         all_chunks.extend(chunks)
@@ -113,6 +114,18 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
                           if host == root or host.endswith("." + root)), None)
             if owner and pg.get("department", owner) == owner:
                 pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], "public", owner))
+    from .linked_fetch import INDEX
+    linked_index = RAW_DIR / INDEX
+    if linked_index.is_file():
+        from urllib.parse import urlsplit
+        have = {page.url for page in pages}
+        for pg in json.loads(linked_index.read_text(encoding="utf-8")):
+            settings = src.get("linked_pages", {}).get(pg["department"])
+            path = RAW_DIR / raw_name(pg["url"])
+            if (settings and urlsplit(pg["url"]).netloc in settings["hosts"]
+                    and pg["scope"] == "public" and pg["url"] not in have and path.is_file()):
+                pages.append(PageInput(pg["url"], path.read_bytes(), pg["doc_type"], pg["scope"], pg["department"]))
+                have.add(pg["url"])
     fx_path = ROOT / src.get("fixtures", "fixtures/fixtures.yaml")
     if include_fixtures and fx_path.exists():
         for fx in yaml.safe_load(fx_path.read_text(encoding="utf-8"))["fixtures"]:

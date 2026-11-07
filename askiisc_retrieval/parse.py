@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from .web_links import EMAIL, anchor_emails, page_key
+
 MAIN = [".entry-content", "article", "main", "#content", "#main", ".content", "body"]
 DROP = ["script", "style", "noscript", "iframe", "form", "svg", "button", "nav", "header", "footer",
         "aside", "[role=navigation]", "[role=contentinfo]", ".breadcrumb", ".navbar", ".sidebar", "#sidebar",
@@ -77,6 +79,8 @@ class Section:
     kind: str = "text"                      # text | row
     course_codes: list[str] = field(default_factory=list)
     department: str | None = None
+    links: list[tuple[str, str]] = field(default_factory=list)  # text line and its link
+    contacts: list[str] = field(default_factory=list)
 
     @property
     def heading(self) -> str:
@@ -92,16 +96,16 @@ class ParsedPage:
     boiler_lines: int = 0          # footer-phrase lines removed (diagnostics)
 
 
-def _table_rows(table: Tag) -> tuple[list[str], list[list[str]]]:
+def _table_rows(table: Tag) -> tuple[list[str], list[tuple[list[str], list[str]]]]:
     rows = []
     for tr in table.find_all("tr"):
         cells = [norm(c.get_text(" ")) for c in tr.find_all(["th", "td"])]
         if any(cells):
-            rows.append(cells)
+            rows.append((cells, [a["href"] for a in tr.find_all("a", href=True)]))
     if not rows:
         return [], []
-    has_th = table.find("th") is not None
-    header = rows[0] if (has_th or any("course" in c.lower() for c in rows[0])) else []
+    first = rows[0][0]
+    header = first if (table.find("th") is not None or any("course" in c.lower() for c in first)) else []
     return header, rows[1:] if header else rows
 
 
@@ -128,13 +132,27 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
         for t in root.select(sel):
             t.decompose()
 
+    # Visible text keeps literal addresses hidden behind labels such as "mail".
+    # Keep the surrounding cell, paragraph or list item so the owner is citable.
+    for anchor in root.find_all("a", href=True):
+        for address in anchor_emails(anchor["href"]):
+            if address not in anchor.get_text(" ").lower():
+                anchor.append(NavigableString(f" (email: {address})"))
+
     sections: list[Section] = []
     path: list[tuple[int, str, str | None]] = []
     buf: list[str] = []
+    links: list[tuple[str, str]] = []
     term: list[str | None] = [None]
 
     def section_department():
         return next((owner for _, _, owner in reversed(path) if owner), None)
+
+    def append(text: str, hrefs=()):
+        buf.append(text)
+        for href in hrefs:
+            if (target := page_key(href, url)) and target != page_key(url):
+                links.append((text, target))
 
     def flush():
         txt = "\n".join(buf).strip()
@@ -142,10 +160,12 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
             heading = " > ".join(h for _, h, _ in path)
             sections.append(Section([h for _, h, _ in path], txt, term[0],
                                     course_codes=course_codes(heading + " " + txt),
-                                    department=section_department()))
+                                    department=section_department(), links=list(dict.fromkeys(links)),
+                                    contacts=[line for line in buf if EMAIL.search(line)]))
         buf.clear()
+        links.clear()
 
-    def set_heading(level: int, text: str, department: str | None = None):
+    def set_heading(level: int, text: str, department: str | None = None, *, node=None):
         flush()
         while path and path[-1][0] >= level:
             path.pop()
@@ -154,12 +174,16 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
             term[0] = t
         elif level <= 2:
             term[0] = None                    # a new top-level section ends the previous term
+        if node is not None:
+            for anchor in node.find_all("a", href=True):
+                if label := norm(anchor.get_text(" ")):
+                    append(label, [anchor["href"]])
 
     def walk(node: Tag):
         for ch in node.children:
             if isinstance(ch, NavigableString):
                 if type(ch) is NavigableString and (t := norm(str(ch))):
-                    buf.append(t)
+                    append(t)
                 continue
             if not isinstance(ch, Tag):
                 continue
@@ -169,11 +193,11 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
                     if owner:
                         from .departments import validate_codes
                         validate_codes([owner])
-                    set_heading(HEADINGS[ch.name], t, owner)
+                    set_heading(HEADINGS[ch.name], t, owner, node=ch)
             elif ch.name == "table":
                 header, rows = _table_rows(ch)
                 flush()
-                for cells in rows:
+                for cells, hrefs in rows:
                     if header and len(header) == len(cells):
                         text = "; ".join(f"{h}: {v}" for h, v in zip(header, cells) if v)
                     else:
@@ -181,17 +205,34 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
                     codes = course_codes(cells[0] if cells else "")
                     label = (path[-1][1] if path else title) + (f" | {cells[0]}" if codes else "")
                     sections.append(Section([h for _, h, _ in path[:-1]] + [label], text, term[0], "row",
-                                            course_codes=codes or course_codes(text), department=section_department()))
+                                            course_codes=codes or course_codes(text), department=section_department(),
+                                            links=[(text, target) for href in hrefs if (target := page_key(href, url))
+                                                   and target != page_key(url)],
+                                            contacts=[text] if EMAIL.search(text) else []))
+            elif ch.name == "div" and ch.find("a", href=lambda href: href and href.lower().startswith("mailto:")):
+                # Some staff directories put a name link and an email in an inline card.
+                # Keeping the small card as one line preserves their relationship.
+                anchors = ch.find_all("a", href=True, limit=3)
+                t = norm(ch.get_text(" "))
+                if (len(anchors) == 2 and len(t) <= 350 and len(EMAIL.findall(t)) == 1
+                        and not ch.find(["table", "li", *HEADINGS])
+                        and sum(bool(anchor_emails(a["href"])) for a in anchors) == 1
+                        and sum(bool(page_key(a["href"], url)) for a in anchors) == 1):
+                    append(t, [a["href"] for a in anchors])
+                else:
+                    walk(ch)
             elif ch.name in BLOCKS and not ch.find(["table"] + list(HEADINGS)):
                 t = norm(ch.get_text(" "))
                 if not t:
                     continue
                 if ch.name in ("p", "dt") and COURSE_HEADING_RE.match(t) and len(t) < 160:
-                    set_heading(4, t)                       # course headings styled as <p><strong>
+                    set_heading(4, t, node=ch)              # course headings styled as <p><strong>
                 elif ch.name == "p" and parse_term(t) and len(t) < 120:
-                    set_heading(3, t)                       # term headings styled as paragraphs
+                    set_heading(3, t, node=ch)              # term headings styled as paragraphs
                 else:
-                    buf.append(("- " if ch.name == "li" else "") + t)
+                    append(("- " if ch.name == "li" else "") + t, [a["href"] for a in ch.find_all("a", href=True)])
+            elif ch.name == "a" and (t := norm(ch.get_text(" "))):
+                append(t, [ch["href"]] if ch.has_attr("href") else [])
             else:
                 walk(ch)
 
@@ -209,6 +250,8 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
         removed += len(lines) - len(keep)
         if any(ln.strip() for ln in keep):
             sec.text = "\n".join(keep)
+            sec.links = [(line, target) for line, target in sec.links if line in keep]
+            sec.contacts = [line for line in sec.contacts if line in keep]
             cleaned.append(sec)
     return ParsedPage(url, title, cleaned, root_sel, removed)
 

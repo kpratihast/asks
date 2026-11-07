@@ -154,6 +154,7 @@ class Retriever:
         rerank = use_rerank and self.reranker is not None
         pool = self.rerank_pool if rerank else self.top_k
         ranked = self._rank(self._apply_term_logic(hits, info), info)
+        link_anchors = [Passage(c, score, via[c.chunk_id]) for c, score in ranked if c.links or (c.doc_type == "schedule" and c.course_codes)]
         ranked = self._cover_departments(ranked, departments, lambda item: item[0].department)[:max(pool, self.top_k)]
         if rerank:                                      # people-pass chunks always reach the reranker, which
             have = {c.chunk_id for c, _ in ranked}      # decides; a short profile chunk is otherwise cut by
@@ -206,7 +207,7 @@ class Retriever:
                 connection_status = "unavailable"
                 degraded, reason = True, f"connection error: {type(exc).__name__}"
         policy_trace = {}
-        if use_graph and self.graph is not None and connection_status is None:
+        if use_graph and self.graph is not None and connection_status is None and not info.course_codes:
             from .policy_graph import retrieve_policy
             try:
                 policy_passages, policy_proofs, policy_trace = _graph_pool.submit(
@@ -218,6 +219,15 @@ class Retriever:
             except Exception as exc:
                 degraded, reason = True, f"policy graph error: {type(exc).__name__}"
                 policy_trace = {"status": "unavailable"}
+        if use_graph and self.graph is not None and not degraded and connection_status is None and not proof_passages:
+            from .link_graph import linked_evidence
+            try:
+                proof_passages, link_proofs = _graph_pool.submit(
+                    linked_evidence, passages, link_anchors, info, self.graph, self.store, snap, scopes, qvec
+                ).result(timeout=self.graph_timeout_s)
+                graph_proofs.extend(link_proofs)
+            except Exception as exc:
+                degraded, reason = True, f"link graph error: {type(exc).__name__}"
         # Explicit document questions must retain the authorized document, even when exact
         # course matches otherwise crowd the identifier-free exam lookup out of top-k.
         targeted = self._document_passages(info, snap, scopes)
@@ -237,6 +247,14 @@ class Retriever:
         sufficient = None if (top is None or self.rerank_min is None) else top >= self.rerank_min
         if missing_departments or (connection_status is not None and connection_status != "complete"):
             sufficient = False
+        from .link_graph import EMAIL_QUESTION
+        if info.course_codes and EMAIL_QUESTION.search(query):
+            # Refuse to borrow another course's contact or a different term's instructor.
+            exact = set(info.course_codes)
+            if not any(exact.intersection(p.chunk.course_codes)
+                       and (not info.term_is_explicit or p.chunk.academic_term == info.target_term)
+                       for p in passages):
+                sufficient = False
         citations = build_citations(passages)            # only audited passages can be cited
         return RetrievalResult(query, passages, snap.snapshot_id, degraded, reason,
                                info.target_term, timings, top, sufficient, rerank_error, citations,

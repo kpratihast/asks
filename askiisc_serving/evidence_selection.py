@@ -20,6 +20,11 @@ def evidence_bundle(question: str, hits: list[dict]) -> tuple[list[dict], set[st
     # Ordered graph proofs carry explicit dependencies across source documents.
     dependencies = {cid for h in hits for support in h.get('graph_support', [])
                     if support.get('proof_id') or support.get('policy_bundle_id') for cid in support.get('required_chunk_ids', [])}
+    # A single policy passage can improve ranking without crowding out other
+    # sources. Only a real multi-source dependency needs exclusive packing.
+    if len(dependencies) == 1 and not any(
+            support.get("proof_id") for hit in hits for support in hit.get("graph_support", [])):
+        return list(hits), set()
     if dependencies:
         core = [h for h in hits if dependencies.intersection(h.get('chunk_ids', []))]
         available = {cid for h in core for cid in h.get('chunk_ids', [])}

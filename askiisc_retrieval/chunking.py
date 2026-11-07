@@ -51,5 +51,7 @@ def chunk_page(page: ParsedPage, *, version_id: str, document_id: str, scope: st
                 source_url=page.url, title=page.title, section_heading=sec.heading, text=piece,
                 access_scope=scope, doc_type=doc_type, department=sec.department or department,
                 academic_term=sec.academic_term, course_codes=codes,
-                embedding_model=embedding_model, ordinal=ordinal))
+                embedding_model=embedding_model, ordinal=ordinal,
+                links=list(dict.fromkeys(url for line, url in sec.links if line in piece)),
+                contacts=[line for line in sec.contacts if line in piece]))
     return chunks

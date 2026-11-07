@@ -34,6 +34,11 @@ def runtime_config(raw):
     if not isinstance(out.get('SERVED_MODEL'),str) or not out['SERVED_MODEL'].strip():raise ValueError('Set SERVED_MODEL explicitly')
     for k in ['MODEL_REASONING','MODEL_PROVIDER_PREFERENCES','CHAT_TEMPLATE_KWARGS']:
         if not isinstance(out[k],dict):raise ValueError(k+' must be an object')
+    overrides = out['AUTH_PROFESSOR_TEST_EMAILS']
+    if (not isinstance(overrides, str) or any(
+            not re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,63}@iisc\.ac\.in', email.strip().lower())
+            for email in overrides.split(',') if email.strip())):
+        raise ValueError('Professor test overrides must be comma-separated @iisc.ac.in email addresses')
     if not isinstance(out['EMAIL_AUTH_ENABLED'],bool):raise ValueError('EMAIL_AUTH_ENABLED must be a JSON boolean')
     if out['EMAIL_AUTH_ENABLED'] and any(not out.get(k) for k in ['SMTP_HOST','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM']):
         raise ValueError('Email authentication requires the SMTP host, username, password and sender')

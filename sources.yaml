@@ -26,5 +26,13 @@ crawl:
   max_pages: 200      # hard cap (CPU embedding time grows with this)
   delay_s: 0.5        # politeness delay between downloads
 
+# Follow links from public source pages during ingestion. Each host must be approved.
+linked_pages:
+  CDS:
+    hosts: [cds.iisc.ac.in]
+    from_types: [schedule, catalogue]
+    doc_type: page
+    max_pages: 12
+
 # Synthetic test documents (fixtures/). These exist only to test filters; see fixtures/README.md.
 fixtures: fixtures/fixtures.yaml

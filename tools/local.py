@@ -69,8 +69,9 @@ def prepare(refresh=False, rebuild=False):
     config.RAW_DIR.mkdir(parents=True, exist_ok=True)
     pages, manifest = [], {}
     # Fixed approved source list only: no synthetic fixtures, no unbounded crawl.
+    sources = load_sources()
     with httpx.Client(timeout=45, follow_redirects=True, headers={"User-Agent": UA}, trust_env=False) as client:
-        for pg in load_sources()["pages"]:
+        for pg in sources["pages"]:
             target = config.RAW_DIR / raw_name(pg["url"])
             try:
                 if refresh or not target.exists():
@@ -91,6 +92,9 @@ def prepare(refresh=False, rebuild=False):
     # Include the full cached crawl and bounded admissions snapshot on rebuild;
     # rebuilding only the small seed list would silently discard most local knowledge.
     from askiisc_retrieval.ingest_stub import load_page_inputs
+    if sources["linked_pages"] and not rebuild:
+        from askiisc_retrieval.linked_fetch import fetch_linked
+        print(f"Approved linked pages: {fetch_linked(sources, refresh=refresh)}")
     pages = load_page_inputs(include_fixtures=False)
     if (config.DATA / 'admissions' / 'sources.json').is_file():
         print('Admissions sources: using the verified cache. Use tools/import_admissions.py --fetch for a fresh bounded snapshot.')

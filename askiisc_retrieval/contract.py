@@ -32,6 +32,8 @@ class ChunkPayload:
     course_codes: list[str]       # normalised, e.g. ["DS252"]; empty if none
     embedding_model: str          # e.g. "BAAI/bge-m3"
     ordinal: int                  # position within the version
+    links: list[str] = field(default_factory=list)  # HTTP targets written in this passage
+    contacts: list[str] = field(default_factory=list)  # source lines that publish an email
 
     def to_dict(self) -> dict:
         return asdict(self)

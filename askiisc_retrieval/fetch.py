@@ -8,6 +8,7 @@ import os
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+import re
 
 import httpx
 import yaml
@@ -45,9 +46,17 @@ def load_sources() -> dict:
     validate_codes([default, *(page.get("department", default) for page in pages),
                     *(group["department"] for group in groups)])
     enabled = {*source_departments(default), SHARED}
+    linked = sources.get("linked_pages", {})
+    validate_codes(linked)
+    for owner, options in linked.items():
+        if (not isinstance(options["max_pages"], int) or not 0 <= options["max_pages"] <= 50
+                or not options["hosts"]
+                or any(not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]+", host) for host in options["hosts"])):
+            raise ValueError(f"Invalid linked page limits or approved hosts for {owner}")
     return {**sources, "department": default,
             "pages": [page for page in pages if page.get("department", default) in enabled],
-            "crawls": [group for group in groups if group["department"] in enabled]}
+            "crawls": [group for group in groups if group["department"] in enabled],
+            "linked_pages": {owner: opts for owner, opts in linked.items() if owner in enabled}}
 
 
 def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
@@ -83,5 +92,8 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
                           department=crawl_cfg["department"])
             results.append({"url": "(crawl)", "status": f"{len(found)} pages"})
             print(f"Crawl: {len(found)} pages")
+    if sources["linked_pages"]:
+        from .linked_fetch import fetch_linked
+        results.append({"url": "(approved links)", "status": f"{fetch_linked(sources, refresh=refresh)} pages"})
     index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
     return results

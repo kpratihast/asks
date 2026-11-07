@@ -199,7 +199,7 @@ python deploy/aws/awsctl.py put-secret \
 
 The command prints parameter version metadata, not its value. The instance reads only this parameter; values are stored in a protected per-release file. Standard SecureString uses KMS encryption. [Parameter Store encryption](https://docs.aws.amazon.com/systems-manager/latest/userguide/secure-string-parameter-kms-encryption.html).
 
-Fresh AWS configurations default to email authentication enabled and an empty professor test override. This user-authorized test deployment retains `kshitijprat1@iisc.ac.in` as the exact professor test address, matching the requested local test behavior. OTP remains mandatory; every other address uses the normal CDS faculty-directory checks. Clear `AUTH_PROFESSOR_TEST_EMAILS` before moving beyond this test exception. Set `EMAIL_AUTH_ENABLED` to `false` for public-only mode; this does not unlock restricted content.
+AWS configurations default to email authentication enabled and an empty professor test override. Set `AUTH_PROFESSOR_TEST_EMAILS` in the private runtime JSON to an exact IISc address only when testing. The address still needs OTP verification. Set the value to an empty string and deploy a fresh release to remove the override. Set `EMAIL_AUTH_ENABLED` to `false` for public-only mode; this does not unlock restricted content.
 
 ### Switch AWS models from one local command
 
@@ -321,7 +321,7 @@ To pause compute charges, stop the EC2 instance in the console. The Elastic IP a
 
 ## Validation record
 
-Deployed on 30 October 2026 at **https://13.203.0.141**, on the FREE account plan using authorized credits. Active release: `model-20261031T054249Z-local`; previous: `aws-20261031-ngrok-r9`. The model is the user's local MLX Qwen3.5-9B through a temporary ngrok HTTPS tunnel. The exact test-professor exception for `kshitijprat1@iisc.ac.in` is enabled with OTP mandatory, as previously requested; other IDs use the normal CDS directory checks.
+Deployed on 30 October 2026 at **https://13.203.0.141**, on the FREE account plan using authorized credits. Active release: `model-20261031T054249Z-local`; previous: `aws-20261031-ngrok-r9`. The model is the user's local MLX Qwen3.5-9B through a temporary ngrok HTTPS tunnel. That historical release used a configured professor test exception with OTP.
 
 The AL2023/Python 3.12 CPU dependency install, offline 515-chunk index validation, cited candidate generation, activation, subsequent app/configuration releases and private S3 backup succeeded on EC2. Live checks passed for trusted HTTPS, readiness, public cited chat, streaming connected answer with two graph proofs, guest private-access denials, IISc-only email validation, hidden diagnostics, redirects and SMTP TLS/authentication. A real mailbox OTP verification was not performed in this deployment run.
 

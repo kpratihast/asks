@@ -150,11 +150,12 @@ class Neo4jGraphStore:
     """GraphStore over Neo4j (read-through cache). `fetch` returns EDGE_QUERY records."""
 
     def __init__(self, fetch: Callable[[], list[dict]], ttl_s: float = 300.0, label: str = "neo4j",
-                 supplement: Callable[[], list[Edge]] | None = None, evidence_chunks=None):
+                 supplement: Callable[[], list[Edge]] | None = None, evidence_chunks=None,
+                 linked_edges: Callable[[], list[Edge]] | None = None):
         """`supplement`: extra edges (rule-based, from the ingestion chunks) merged into what Neo4j
         returns, for relations the ingestion graph does not have yet. Neo4j edges win on duplicates."""
         self.fetch, self.ttl, self.label, self.supplement = fetch, ttl_s, label, supplement
-        self.evidence_chunks = evidence_chunks
+        self.evidence_chunks, self.linked_edges = evidence_chunks, linked_edges
         self._inner: JsonGraphStore | None = None
         self._at = 0.0
         self.error: str | None = None
@@ -190,6 +191,11 @@ class Neo4jGraphStore:
                 edges, added = merge_edges(edges, self.supplement())
             except Exception as e:                                 # rules must never take the graph down
                 log.warning("graph rule supplement failed: %s", e)
+        if self.linked_edges is not None:
+            try:
+                edges.extend(self.linked_edges())
+            except Exception as e:
+                log.warning("linked evidence unavailable: %s", type(e).__name__)
         g = JsonGraphStore(edges)
         for node, names in aliases.items():
             g.add_aliases(node, names)
@@ -212,6 +218,9 @@ class Neo4jGraphStore:
 
     def expand(self, *a, **kw):
         return self._g().expand(*a, **kw)
+
+    def outgoing(self, node, relation):
+        return self._g().outgoing(node, relation)
 
     def entities_of_chunks(self, chunk_ids):
         return self._g().entities_of_chunks(chunk_ids)

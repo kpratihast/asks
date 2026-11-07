@@ -329,11 +329,11 @@ def test_reviewed_import_detects_tampering(tmp_path):
 
 def test_exact_test_professor_override_requires_otp_and_preserves_other_id_checks(stack, auth):
     c, _, model = stack
-    auth.test_professors = frozenset({'kshitijprat1@iisc.ac.in'})
+    auth.test_professors = frozenset({'professor-test@iisc.ac.in'})
     q = {'question': 'What is the final examination date for DS252?'}
     assert c.post('/v1/ask', json=q).status_code == 401
     # Requesting a code cannot confer the role before successful verification.
-    issued = c.post('/auth/request-otp', json={'email': 'KSHITIJPRAT1@IISC.AC.IN'})
+    issued = c.post('/auth/request-otp', json={'email': 'PROFESSOR-TEST@IISC.AC.IN'})
     assert issued.status_code == 200
     assert not c.get('/auth/me').json()['authenticated']
     assert c.post('/v1/ask', json=q).status_code == 401
@@ -343,21 +343,21 @@ def test_exact_test_professor_override_requires_otp_and_preserves_other_id_check
     assert c.post('/v1/ask', json=q).status_code == 200
     assert 'FACULTY_SECRET_DATE' in json.dumps(model.requests)
     c.post('/auth/logout')
-    assert otp_login(c, auth, 'kshitijprat1.student@iisc.ac.in').json()['role'] == 'student'
+    assert otp_login(c, auth, 'professor-test.student@iisc.ac.in').json()['role'] == 'student'
     assert c.post('/v1/ask', json=q).status_code == 403
-    assert c.post('/auth/request-otp', json={'email':'kshitijprat1@gmail.com'}).status_code == 422
+    assert c.post('/auth/request-otp', json={'email':'professor-test@gmail.com'}).status_code == 422
     c.post('/auth/logout')
     assert otp_login(c, auth, 'phanim@iisc.ac.in').json()['role'] == 'faculty'
 
 
 def test_test_override_is_configured_separately_and_updates_existing_verified_session(auth):
-    issued = auth.issue('kshitijprat1@iisc.ac.in', 'ip')
+    issued = auth.issue('professor-test@iisc.ac.in', 'ip')
     token, identity = auth.verify(issued['challenge_id'], auth.mailer.messages[-1][1])
     assert identity['role'] == 'student'
-    auth.s.professor_test_emails = ('KSHITIJPRAT1@IISC.AC.IN',)
+    auth.s.professor_test_emails = ('PROFESSOR-TEST@IISC.AC.IN',)
     promoted = EmailAuth(auth.s, auth.mailer, auth.clock)
     assert promoted.lookup(token).role == 'faculty'
-    assert promoted.identity('kshitijprat1@iisc.ac.in')['display_role'] == 'Professor'
+    assert promoted.identity('professor-test@iisc.ac.in')['display_role'] == 'Professor'
     assert promoted.role_for('student@iisc.ac.in') == 'student'
     auth.s.professor_test_emails = ()
     assert EmailAuth(auth.s, auth.mailer, auth.clock).lookup(token).role == 'student'
