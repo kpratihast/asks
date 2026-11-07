@@ -1,0 +1,131 @@
+questions:
+
+- id: GR001
+  category: graph_connected
+  question: Which faculty member teaches DS 252 and is also listed as the leader of DREAM Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Yogesh Simmhan teaches DS252 and leads DREAM Lab.
+  section_label: DREAM Lab
+
+- id: GR002
+  category: graph_connected
+  question: Which faculty member teaches DS252 and whose research interests mention cloud computing?
+  gold:
+  - url: https://cds.iisc.ac.in/faculty/simmhan/
+  verified: true
+  expected_answer: Yogesh Simmhan teaches DS252 and his research interests include cloud computing.
+  section_label: Research Interests
+
+- id: GR003
+  category: graph_connected
+  question: Which admissions lab focuses on distributed systems and graph analytics, and which course taught by the same faculty member relates to those topics?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: DREAM Lab and DS252 are linked through Yogesh Simmhan.
+  section_label: DREAM Lab
+
+- id: GR004
+  category: graph_connected
+  question: Which faculty member appears in the course schedule, faculty page and admissions page?
+  gold:
+  - url: https://cds.iisc.ac.in/faculty/simmhan/
+  verified: true
+  expected_answer: Yogesh Simmhan.
+  section_label: Faculty
+
+- id: GR005
+  category: graph_connected
+  question: Which CDS course is taught by the faculty member leading DREAM Lab?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: DS252 Introduction to Cloud Computing.
+  section_label: Course Schedule
+
+- id: GR006
+  category: graph_connected
+  question: Compare the duration of the CDS PhD programme and M.Tech Research programme.
+  gold:
+  - url: https://cds.iisc.ac.in/academics/degree-programs/
+  verified: true
+  expected_answer: PhD lasts 3–5 years, M.Tech Research lasts 2 years.
+  section_label: Degrees by Research
+
+- id: GR007
+  category: graph_connected
+  question: Which CDS courses are taught by faculty who lead admissions labs?
+  gold:
+  - url: https://cds.iisc.ac.in/courses/schedule/
+  verified: true
+  expected_answer: Multiple CDS instructors also lead admissions labs.
+  section_label: Course Schedule
+
+- id: GR008
+  category: graph_connected
+  question: Which admissions labs mention AI or machine learning and who leads them?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: Several labs including FLAME, BioMedIA, VAL and NLP Lab.
+  section_label: Admissions Labs
+
+- id: GR009
+  category: graph_connected
+  question: Which course instructors are associated with scalable systems research?
+  gold:
+  - url: https://cds.iisc.ac.in/faculty/simmhan/
+  verified: true
+  expected_answer: Yogesh Simmhan is associated with scalable systems and teaches DS252.
+  section_label: Research Interests
+
+- id: GR010
+  category: graph_connected
+  question: Which admissions labs overlap with CDS courses covering cloud computing or scalable systems?
+  gold:
+  - url: https://cds.iisc.ac.in/admissions/research-degrees/
+  verified: true
+  expected_answer: DREAM Lab overlaps with DS252 and scalable systems courses.
+  section_label: DREAM Lab
+
+- id: GU001
+  category: unanswerable
+  question: Which CDS faculty member will supervise the most students in 2028?
+  gold: []
+  verified: true
+  expected_answer: Unknown.
+  section_label: None
+
+- id: GU002
+  category: unanswerable
+  question: Which CDS lab will admit the largest number of research students next year?
+  gold: []
+  verified: true
+  expected_answer: Unknown.
+  section_label: None
+
+- id: GU003
+  category: unanswerable
+  question: Which faculty member will teach DS252 in 2029?
+  gold: []
+  verified: true
+  expected_answer: Unknown.
+  section_label: None
+
+- id: GU004
+  category: unanswerable
+  question: Which CDS lab currently has the highest budget?
+  gold: []
+  verified: true
+  expected_answer: Unknown.
+  section_label: None
+
+- id: GU005
+  category: unanswerable
+  question: Which professor will receive the next grant award?
+  gold: []
+  verified: true
+  expected_answer: Unknown.
+  section_label: None
