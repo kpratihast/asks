@@ -27,6 +27,20 @@ def test_mailto_is_preserved_with_its_context_and_other_links():
     assert sec.links == [(sec.text, BASE+'/profiles/ada')]
 
 
+def test_lab_directory_row_creates_a_scoped_leadership_edge():
+    from askiisc_retrieval.chunking import chunk_page
+    from askiisc_retrieval.graph_rules import build_edges
+
+    page = parse_html(BASE+'/labs/', '''<main><h1>Labs</h1><table>
+        <tr><th>Lab</th><th>Faculty in Charge</th><th>Room</th></tr>
+        <tr><td>Imaging Lab</td><td>Ada Mora</td><td>210</td></tr></table></main>''')
+    chunks = chunk_page(page, version_id='v', document_id='d', scope='public',
+                        doc_type='research', department='ECE', embedding_model='test')
+    [edge] = [edge for edge in build_edges(chunks) if edge.rel == 'HEADS']
+    assert (edge.src, edge.dst, edge.department, edge.scope) == ('Person:a mora', 'Lab:Imaging Lab', 'ECE', 'public')
+    assert edge.chunk_ids == (chunks[0].chunk_id,)
+
+
 def test_link_fetch_does_not_follow_an_unapproved_redirect():
     requests = []
 

@@ -8,7 +8,7 @@ From the checkout root, with the normal Ask IISc dependencies and model configur
 
 ```bash
 export ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE
-export ASKIISC_DATA_DIR="$PWD/data/instiwide-pilot"
+export ASKIISC_DATA_DIR="$PWD/data/department-pilot"
 ./run-local.sh --prepare
 ./run-local.sh --port 8102
 ```

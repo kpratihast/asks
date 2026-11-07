@@ -29,7 +29,7 @@ BLOCKS = {"p", "li", "dd", "dt", "pre", "blockquote"}
 
 COURSE_RE = re.compile(r"\b(?!CDS\b)([A-Z]{1,3}[0-9]?)\s?-?\s?(\d{3})\b")
 # A paragraph that *is* a course heading, e.g. "DS 252 (AUG) 3:1 Cloud Computing"
-COURSE_HEADING_RE = re.compile(r"^\s*(?!CDS\b)[A-Z]{1,3}[0-9]?\s?\d{3}\s*\((?:AUG|JAN|Aug|Jan)\)\s*\d:\d")
+COURSE_HEADING_RE = re.compile(r"^\s*(?!CDS\b)[A-Z]{1,3}[0-9]?\s?\d{3}\s*\(\s*(?:AUG|JAN)\s*\)\s*\d\s*:\s*\d", re.I)
 _MON = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
 # Every format on the CDS schedule page 2014-2026, e.g. "Aug - Dec 2026", "Jan 2024 - Apr 2024",
 # "Feb-May (2021)", "Oct 2020 -Jan 2021", "May-June (summer) 2019", "(Aug-Dec, 2016)", "(Jan-May 2016)"

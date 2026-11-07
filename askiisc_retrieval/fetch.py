@@ -1,4 +1,4 @@
-"""Fetch the fixed page list once and save raw HTML to data/raw/. Not a crawler: no link following.
+"""Cache configured pages and documents under data/raw/ before crawling or following links.
 Re-running skips pages already saved unless --refresh is given, so the dev corpus stays stable."""
 from __future__ import annotations
 
@@ -16,10 +16,23 @@ import yaml
 from .config import RAW_DIR, ROOT
 
 UA = "AskIISc-dev/0.1 (DS252 course project; retrieval dev snapshot)"
+MAX_SOURCE_BYTES = 8 * 1024 * 1024
 
 
 def raw_name(url: str) -> str:
-    return hashlib.sha256(url.encode()).hexdigest()[:16] + ".html"
+    suffix = ".pdf" if urlsplit(url).path.lower().endswith(".pdf") else ".html"
+    return hashlib.sha256(url.encode()).hexdigest()[:16] + suffix
+
+
+def download_source(client: httpx.Client, url: str) -> bytes:
+    body = bytearray()
+    with client.stream("GET", url) as response:
+        response.raise_for_status()
+        for block in response.iter_bytes():
+            if len(body) + len(block) > MAX_SOURCE_BYTES:
+                raise ValueError("Source exceeds the download size limit")
+            body.extend(block)
+    return bytes(body)
 
 
 def load_sources() -> dict:
@@ -72,16 +85,15 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
                 results.append({"url": url, "status": "cached"})
                 continue
             try:
-                r = client.get(url)
-                r.raise_for_status()
-            except httpx.HTTPError as e:
+                body = download_source(client, url)
+            except (httpx.HTTPError, ValueError) as e:
                 print(f"  FAILED  {url}  ({e})")
                 results.append({"url": url, "status": f"error: {e}"})
                 continue
-            path.write_bytes(r.content)
+            path.write_bytes(body)
             index[url] = {"file": path.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                          "bytes": len(r.content)}
-            print(f"  saved   {url}  ({len(r.content) // 1024} KB)")
+                          "bytes": len(body)}
+            print(f"  saved   {url}  ({len(body) // 1024} KB)")
             results.append({"url": url, "status": "saved"})
             time.sleep(delay_s)                  # be polite to the institute server
         for crawl_cfg in sources["crawls"]:

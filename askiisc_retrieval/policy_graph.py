@@ -153,7 +153,7 @@ def requested_facets(query):
         if re.search(r'cfti|iit|salar|employ|sponsor|guarantee|entitled|eligib|exception|how many years|maximum|funding.*years|how long.{0,30}(?:scholarship|fellowship|funding)',q):out.append('FUNDING_CONDITIONS')
         if not any(f.startswith('FUNDING') for f in out):out.append('FUNDING_AMOUNT')
     add('APPLICATION_FEE',r'application\s+fees?|fees?\s+(?:for|per|of)\s+(?:an?\s+)?(?:online\s+)?application')
-    if re.search(r'tuition|first.year.*fee|annual.*fee|fee total|refundable|deposits?',q):out.append('FEES')
+    if re.search(r'tuition|first.year.*fee|annual.*fee|fee (?:total|structure)|(?:programme|program) fees?|refundable|deposits?',q):out.append('FEES')
     add('APPLICATION_CHOICES',r'(?:three|3|how many|max\w*)\s+(?:m\.?tech\.?\s+)?(?:departments|disciplines)|(?:one|single)\s+application|research and course.*application')
     add('LAB_PREFERENCES',r'(?:three|3|how many|choose|select).*?labs|candidate information form')
     add('TEST_SYLLABUS',r'prepar|syllabus|programming languages|maths.*topics')

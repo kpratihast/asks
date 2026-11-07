@@ -57,8 +57,8 @@ def prepare(refresh=False, rebuild=False):
     import httpx
     from askiisc_retrieval import config
     from askiisc_retrieval.cli import make_embedder, make_store
-    from askiisc_retrieval.fetch import UA, load_sources, raw_name
-    from askiisc_retrieval.ingest_stub import PageInput, build_index
+    from askiisc_retrieval.fetch import UA, download_source, load_sources, raw_name
+    from askiisc_retrieval.ingest_stub import build_index
 
     if config.BACKEND != "stub" or config.QDRANT_URL:
         raise SystemExit("Local prepare requires ASKIISC_BACKEND=stub and QDRANT_URL unset. "
@@ -67,7 +67,7 @@ def prepare(refresh=False, rebuild=False):
         print("A local index exists. Use --refresh to fetch and rebuild it while serving is stopped.")
         return
     config.RAW_DIR.mkdir(parents=True, exist_ok=True)
-    pages, manifest = [], {}
+    available, manifest = 0, {}
     # Fixed approved source list only: no synthetic fixtures, no unbounded crawl.
     sources = load_sources()
     with httpx.Client(timeout=45, follow_redirects=True, headers={"User-Agent": UA}, trust_env=False) as client:
@@ -75,16 +75,14 @@ def prepare(refresh=False, rebuild=False):
             target = config.RAW_DIR / raw_name(pg["url"])
             try:
                 if refresh or not target.exists():
-                    response = client.get(pg["url"])
-                    response.raise_for_status()
-                    target.write_bytes(response.content)
+                    target.write_bytes(download_source(client, pg["url"]))
                     manifest[pg["url"]] = {"file": target.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
                     time.sleep(0.5)
-                pages.append(PageInput(pg["url"], target.read_bytes(), pg["doc_type"], pg["scope"]))
+                available += 1
                 print("Source:", pg["url"], flush=True)
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 print(f"Unavailable: {pg['url']} ({type(exc).__name__})", file=sys.stderr)
-    if not pages:
+    if not available:
         raise SystemExit("No configured source pages could be fetched; check network access and retry.")
     old_manifest = config.RAW_DIR / "index.json"
     previous = json.loads(old_manifest.read_text()) if old_manifest.exists() else {}

@@ -40,7 +40,7 @@ def fees_table(table):
     for column in range(1,min(len(categories),len(programmes))):
         if not re.search(r'Ph\.?D|M\.?\s*Tech',programmes[column],re.I) or 'Int.' in programmes[column]:continue
         heading=f'{caption} — {programmes[column]} — {categories[column]}'
-        parts.append('<h3>'+html.escape(heading)+'</h3>')
+        parts.append('<h2>'+html.escape(heading)+'</h2>')
         for row in rows[3:]:
             if len(set(row))==1:
                 if row and row[0]:parts.append('<p>'+html.escape(row[0])+'</p>')
@@ -134,6 +134,7 @@ def normalize_html(body,url,mode,departments=(DEFAULT,)):
                 for row in rows[1:]:
                     if len(row)==2 and re.search(r'M\.?\s*Tech|Ph\.?D',row[0],re.I) and 'Integrated' not in row[0]:
                         frag+='<h3>'+html.escape(row[0])+'</h3><p>Programme: '+html.escape(row[0])+'; Scholarship/fellowship per month: '+html.escape(row[1])+'</p>'
+                frag+='<h2>Scholarship and fellowship conditions</h2>'
             else:frag=fees_table(table)
             table.replace_with(BeautifulSoup(frag,'html.parser'))
         # UG application fees have their own scope and are outside this snapshot.
@@ -180,17 +181,53 @@ def normalize_html(body,url,mode,departments=(DEFAULT,)):
     title=next((text(h) for h in main.find_all('h1') if text(h)!='Admissions'),url)
     return '<html><head><title>'+html.escape(title)+'</title></head><body><main>'+str(main.body or main)+'</main></body></html>'
 
-def pdf_html(path,title,*,max_pages=6):
+def pdf_html(path, title, *, max_pages=6, page_ranges=None, departments=()):
+    from .departments import validate_codes
+    from .fetch import MAX_SOURCE_BYTES
+    from .parse import COURSE_HEADING_RE, norm
     from pypdf import PdfReader
-    reader=PdfReader(path)
-    if len(reader.pages)>max_pages:raise ValueError('PDF page boundary exceeded')
-    parts=['<h1>'+html.escape(title)+'</h1>']
-    for n,page in enumerate(reader.pages,1):
-        value=page.extract_text(extraction_mode='layout') or ''
-        if len(value.strip())<60:raise ValueError('Scanned/empty PDF needs reviewed OCR')
-        parts+=['<h2>'+html.escape(title)+f' — PDF page {n}</h2>']
-        # Keep layout columns within each source line. Page and notice title remain citable.
-        parts+=['<p>'+html.escape(line.strip())+'</p>' for line in value.splitlines() if line.strip()]
+
+    if path.stat().st_size > MAX_SOURCE_BYTES:
+        raise ValueError('PDF exceeds the source size limit')
+    reader = PdfReader(path)
+    if page_ranges is None:
+        if len(reader.pages) > max_pages:
+            raise ValueError('PDF page boundary exceeded')
+        selected = dict.fromkeys(range(1, len(reader.pages) + 1))
+    else:
+        validate_codes(page_ranges)
+        selected = {}
+        for owner, (first, last) in page_ranges.items():
+            if not 1 <= first <= last <= len(reader.pages) or last - first + 1 > max_pages:
+                raise ValueError('Invalid PDF page range')
+            for page in range(first, last + 1):
+                if page in selected:
+                    raise ValueError('Overlapping PDF page ranges')
+                selected[page] = owner
+        if len(selected) > max_pages:
+            raise ValueError('PDF page boundary exceeded')
+        selected = {page: owner for page, owner in selected.items() if owner in (*departments, SHARED)}
+
+    parts = ['<h1>' + html.escape(title) + '</h1>']
+    previous_page, previous_owner, course = 0, None, ''
+    for number, owner in sorted(selected.items()):
+        value = reader.pages[number - 1].extract_text(extraction_mode='layout') or ''
+        if len(value.strip()) < 60:
+            raise ValueError(f'Scanned/empty PDF page {number} needs reviewed OCR')
+        tag = f' data-askiisc-department="{owner}"' if owner else ''
+        parts.append(f'<h2{tag}>{html.escape(title)} — PDF page {number}</h2>')
+        lines = [line.strip() for line in value.splitlines() if line.strip()]
+        if previous_page + 1 != number or owner != previous_owner:
+            course = ''
+        if course and not COURSE_HEADING_RE.match(norm(lines[0])):
+            parts.append(f'<h3>{html.escape(course)}</h3>')
+        for line in lines:
+            if owner and COURSE_HEADING_RE.match(norm(line)):
+                course = norm(line)
+                parts.append(f'<h3>{html.escape(course)}</h3>')
+            else:
+                parts.append(f'<p>{html.escape(line)}</p>')
+        previous_page, previous_owner = number, owner
     return '<html><head><title>'+html.escape(title)+'</title></head><body><main>'+''.join(parts)+'</main></body></html>'
 
 

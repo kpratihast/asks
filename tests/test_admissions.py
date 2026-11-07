@@ -1,11 +1,47 @@
 from pathlib import Path
 import json
+from types import SimpleNamespace
 import pytest
 from bs4 import BeautifulSoup
-from askiisc_retrieval.admissions import normalize_html,table_grid,fees_table
+from askiisc_retrieval.admissions import normalize_html,table_grid,fees_table,pdf_html
 from askiisc_retrieval.parse import parse_html
 from askiisc_retrieval.query_analysis import course_exam_intent,requested_relations
 from askiisc_retrieval.private_documents import DocumentCatalog
+
+
+def test_pdf_seed_keeps_pages_and_course_continuations_in_scope(tmp_path, monkeypatch):
+    import pypdf
+    from askiisc_retrieval import config, fetch
+    from askiisc_retrieval.ingest_stub import load_page_inputs
+
+    url = 'https://example.test/scheme.pdf'
+    filename = fetch.raw_name(url)
+    assert filename.endswith('.pdf')
+    (tmp_path / filename).touch()
+    sample = [
+        'Common rules for the institute. Doctoral students take the prescribed research training credits.',
+        'E2 202 ( AUG ) 3 : 0\nRandom Processes\nThe first page covers probability spaces and random variables.',
+        'The continuation covers stationary processes and spectral representation for time series.',
+        'Unselected department page. This material is deliberately outside the configured source scope.',
+    ]
+    pages = [SimpleNamespace(extract_text=lambda text=text, **_: text) for text in sample]
+    monkeypatch.setattr(pypdf, 'PdfReader', lambda _: SimpleNamespace(pages=pages))
+    monkeypatch.setattr(config, 'RAW_DIR', tmp_path)
+    monkeypatch.setenv('ASKIISC_SOURCE_DEPARTMENTS', 'ECE')
+    monkeypatch.setattr(DocumentCatalog, 'page_inputs', lambda self: [])
+    spec = {'url': url, 'scope': 'public', 'department': 'IISc', 'doc_type': 'catalogue',
+            'pdf': {'title': 'Scheme of Instruction', 'page_ranges': {'IISc': [1, 1], 'ECE': [2, 3], 'CSA': [4, 4]}}}
+    monkeypatch.setattr(fetch, 'load_sources', lambda: {'department': 'CDS', 'pages': [spec], 'crawls': []})
+
+    [page] = load_page_inputs(False)
+    sections = parse_html(url, page.html, tagged_departments=page.tagged_departments).sections
+    assert [s.department for s in sections] == ['IISc', 'ECE', 'ECE']
+    assert sections[2].course_codes == ['E2202']
+    assert 'PDF page 3' in sections[2].heading and 'stationary processes' in sections[2].text
+    with pytest.raises(ValueError, match='Overlapping PDF'):
+        pdf_html(tmp_path / filename, 'Scheme', page_ranges={'IISc': [1, 2], 'ECE': [2, 3]})
+    with pytest.raises(ValueError, match='page boundary'):
+        pdf_html(tmp_path / filename, 'Scheme', max_pages=1, page_ranges={'IISc': [1, 1], 'ECE': [2, 2]})
 
 @pytest.mark.parametrize('query',['What GATE exam is accepted for CDS admissions?','When is the entrance examination timetable published?','Which qualifying exam does Phani Motamarri accept for admissions?'])
 def test_public_admission_tests_do_not_request_private_timetable(query):
@@ -54,12 +90,21 @@ def test_rebuild_retains_cached_crawl_and_admissions(tmp_path,monkeypatch):
     raw=tmp_path/'raw';raw.mkdir();(tmp_path/'admissions').mkdir()
     (tmp_path/'admissions/sources.json').write_text('{}')
     seed='https://example.test/seed';crawl='https://example.test/crawl';updated='https://example.test/admissions'
-    for url in (seed,crawl,updated):(raw/fetch.raw_name(url)).write_text('<main>Original content</main>')
+    fees='https://example.test/fees'
+    for url in (seed,crawl,updated,fees):(raw/fetch.raw_name(url)).write_text('<main>Original content</main>')
     (raw/'crawl.json').write_text(json.dumps([{'url':crawl,'doc_type':'research'},{'url':updated,'doc_type':'admissions'}]))
     monkeypatch.setattr(config,'RAW_DIR',raw)
-    monkeypatch.setattr(fetch,'load_sources',lambda:{'pages':[{'url':seed,'doc_type':'page','scope':'public'}],'department':'CDS','crawls':[{'department':'CDS','seeds':['https://example.test/']}]})
-    monkeypatch.setattr(admissions,'cached_pages',lambda *args:([ingest_stub.PageInput(updated,'Updated content','admissions','public','IISc')],{}))
+    monkeypatch.setattr(fetch,'load_sources',lambda:{'pages':[
+        {'url':seed,'doc_type':'page','scope':'public'},
+        {'url':fees,'doc_type':'admissions','scope':'public','department':'IISc','normalize':'fees'},
+    ],'department':'CDS','crawls':[{'department':'CDS','seeds':['https://example.test/']}]})
+    monkeypatch.setattr(admissions,'normalize_html',lambda *args: 'Current fees')
+    monkeypatch.setattr(admissions,'cached_pages',lambda *args:([
+        ingest_stub.PageInput(updated,'Updated content','admissions','public','IISc'),
+        ingest_stub.PageInput(fees,'Older fees','admissions','public','IISc'),
+    ],{}))
     monkeypatch.setattr(DocumentCatalog,'page_inputs',lambda self:[])
     pages=ingest_stub.load_page_inputs(include_fixtures=False)
-    assert {p.url for p in pages}=={seed,crawl,updated}
+    assert {p.url for p in pages}=={seed,crawl,updated,fees}
     assert next(p for p in pages if p.url==updated).html=='Updated content'
+    assert [p.html for p in pages if p.url==fees]==['Current fees']

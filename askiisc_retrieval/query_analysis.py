@@ -84,8 +84,11 @@ def institute_admissions(info: QueryInfo) -> bool:
     degree = programmes(query)
     if APPLICATION.search(query) and (degree or ACADEMIC_APPLICATION.search(query)):
         return True
-    return bool(institute and degree and set(requested_facets(query)) & {
-        "ELIGIBILITY", "SELECTION", "QUOTA", "INTAKE", "FEES", "FUNDING_AMOUNT", "FUNDING_CONDITIONS",
+    facets = set(requested_facets(query))
+    if (institute or degree) and facets & {"FEES", "FUNDING_AMOUNT", "FUNDING_CONDITIONS"}:
+        return True
+    return bool(institute and degree and facets & {
+        "ELIGIBILITY", "SELECTION", "QUOTA", "INTAKE",
         "APPLICATION_DEADLINE", "INTERVIEW_DATES", "SESSION_START",
     })
 

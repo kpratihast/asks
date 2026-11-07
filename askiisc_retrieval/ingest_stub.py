@@ -90,20 +90,28 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
     from .config import RAW_DIR
     from .departments import SHARED, source_departments
     src = load_sources()
+    departments = source_departments(src["department"])
     pages, missing = [], []
+    normalized_seeds = set()
     for pg in src["pages"]:
         f = RAW_DIR / raw_name(pg["url"])
         if not f.exists():
             missing.append(pg["url"])
             continue
         department = pg.get("department", src["department"])
-        body = f.read_bytes()
         mode = pg.get("normalize")
-        if mode:
+        pdf = pg.get("pdf")
+        if pdf:
+            from .admissions import pdf_html
+            body = pdf_html(f, pdf["title"], max_pages=32, page_ranges=pdf["page_ranges"], departments=departments)
+        elif mode:
             from .admissions import normalize_html
-            body = normalize_html(body, pg["url"], mode, source_departments(src["department"]))
+            body = normalize_html(f.read_bytes(), pg["url"], mode, departments)
+            normalized_seeds.add(pg["url"])
+        else:
+            body = f.read_bytes()
         pages.append(PageInput(pg["url"], body, pg["doc_type"], pg["scope"], department,
-                               tagged_departments=bool(mode and department == SHARED)))
+                               tagged_departments=bool(pdf or (mode and department == SHARED))))
     if missing:
         print(f"WARNING: {len(missing)} page(s) not fetched yet (run `fetch` first): {missing}")
     crawl_index = RAW_DIR / "crawl.json"
@@ -144,6 +152,7 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
         from .admissions import cached_pages
         approved = json.loads((admissions_cache / 'sources.json').read_text())
         admissions, _ = cached_pages(approved, admissions_cache)
+        admissions = [page for page in admissions if page.url not in normalized_seeds]
         refreshed = {p.url for p in admissions}
         pages = [p for p in pages if p.url not in refreshed] + admissions
     from .private_documents import DocumentCatalog

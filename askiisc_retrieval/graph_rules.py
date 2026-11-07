@@ -8,7 +8,7 @@ from .contract import ChunkPayload
 from .parse import course_codes
 from .stores import Edge
 
-GRAPH_RULES_VERSION = "rules-v6-hyperlinks"
+GRAPH_RULES_VERSION = "rules-v7-lab-tables"
 
 PREREQ_RE = re.compile(r"pre-?\s?requisites?\s*:?\s*(.+?)(?:\.\s|$)", re.I | re.S)
 TITLES = re.compile(r"^(prof(essor)?\.?|dr\.?|mr\.?|ms\.?|mrs\.?)\s+", re.I)
@@ -114,7 +114,10 @@ def edges_for_chunk(c: ChunkPayload) -> list[Edge]:
             add(who, "WORKS_ON", f"Topic:{topic}")
 
     # Person -HEADS-> Lab, from lab listings of the form "<n>. <Lab name>" + "Faculty: A, B ...".
-    if (fm := LAB_FACULTY.search(c.text)) and re.search(r"\blab|group\b", c.section_heading, re.I):
+    if c.doc_type == "research" and (fields := _fields(c.text)).get("lab") and fields.get("faculty in charge"):
+        for who in _names(fields["faculty in charge"]):
+            add(who, "HEADS", f"Lab:{fields['lab']}")
+    elif (fm := LAB_FACULTY.search(c.text)) and re.search(r"\blab|group\b", c.section_heading, re.I):
         lab = LAB_NAME.sub("", c.section_heading.split(" > ")[-1]).strip()
         if lab:
             for who in _names(fm.group(1)):

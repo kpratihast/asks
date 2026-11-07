@@ -117,6 +117,7 @@ def test_unqualified_programme_requests_clarification(mixed_retriever):
     'How do I apply for a research programme at IISc?',
     'Where is the application portal?',
     'What are the M.Tech admission routes at the Indian Institute of Science?',
+    'What is the annual tuition fee for M.Tech.?',
 ])
 @pytest.mark.parametrize('use_graph', [False, True])
 def test_institute_admissions_only_uses_institute_passages(mixed_retriever, query, use_graph):
