@@ -211,7 +211,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                           email_login=False, required_scopes=needed, citations=[])
         guest = p.role == "guest"
         message = ("Sign in with your @iisc.ac.in email to access this information." if guest else
-                   "This information is reserved for CDS professors. Sign in with a verified CDS faculty email.")
+                   "This information requires faculty access. Sign in with an authorized IISc faculty email.")
         return _error(401 if guest else 403, message, status="login_required" if guest else "access_denied",
                       answer=message, login_required=guest, required_scopes=needed, citations=[])
 
@@ -226,7 +226,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         if p is None or p.role == "guest":
             return _error(401, "Sign in with your @iisc.ac.in email to open this document.", login_required=True)
         if doc["access_scope"] not in p.scopes:
-            return _error(403, "This document is reserved for CDS professors.")
+            return _error(403, "This document requires faculty access.")
         path = app.state.documents.path(doc)
         if not path.is_file():
             raise HTTPException(404, "Document unavailable")
