@@ -30,7 +30,15 @@ def load_sources() -> dict:
     default = sources.get("department", DEFAULT)
     groups = sources.get("crawls", [])
     if sources.get("crawl"):
-        groups = [{"department": default, **sources["crawl"]}, *groups]
+        crawl_entry = sources["crawl"]
+        if isinstance(crawl_entry, list):
+            crawl_items = [
+                {"department": g.get("department", default), **g}
+                for g in crawl_entry
+            ]
+            groups = [*crawl_items, *groups]
+        elif isinstance(crawl_entry, dict):
+            groups = [{"department": default, **crawl_entry}, *groups]
     pages = sources["pages"]
     if len({page["url"] for page in pages}) != len(pages):
         raise ValueError("A source URL must have exactly one configured owner")

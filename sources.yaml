@@ -1,11 +1,9 @@
-# Pages for the retrieval dev corpus. Fetched ONCE by `python -m askiisc_retrieval.cli fetch`
-# and saved under data/raw/, so every later run works offline on the same snapshot.
-# Add reviewed pages with an explicit department code from config/departments.yaml.
-# Default scope is CDS. Enable others with ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE.
-department: CDS
+department: CDS # Default fallback for entries without an explicit department
+
 pages:
-  - {url: "https://cds.iisc.ac.in/courses/descriptions/",               doc_type: catalogue,  scope: public}
-  - {url: "https://cds.iisc.ac.in/courses/schedule/",                   doc_type: schedule,   scope: public}
+  # --- CDS Standing Pages ---
+  - {url: "https://cds.iisc.ac.in/courses/descriptions/",                doc_type: catalogue,   scope: public}
+  - {url: "https://cds.iisc.ac.in/courses/schedule/",                    doc_type: schedule,    scope: public}
   - {url: "https://cds.iisc.ac.in/courses/m-tech-course-requirements/", doc_type: policy,     scope: public}
   - {url: "https://cds.iisc.ac.in/academics/degree-programs/",          doc_type: policy,     scope: public}
   - {url: "https://cds.iisc.ac.in/admissions/research-degrees/",        doc_type: admissions, scope: public}
@@ -13,26 +11,39 @@ pages:
   - {url: "https://cds.iisc.ac.in/people-all/faculty/",                 doc_type: people,     scope: public}
   - {url: "https://cds.iisc.ac.in/research-new/data-management-computing-and-analytics/", doc_type: research, scope: public}
   - {url: "https://cds.iisc.ac.in/research-new/software-and-runtime-systems/",            doc_type: research, scope: public}
-  # Public pilot sources. Keep current-cycle notices separate from standing programme pages.
+
+  # --- CSA Standing Pages ---
   - {url: "https://www.csa.iisc.ac.in/academics-all/prospective-students-resources/", department: CSA, doc_type: admissions, scope: public}
-  - {url: "https://ece.iisc.ac.in/general-info-mtech-ece/", department: ECE, doc_type: admissions, scope: public}
+  - {url: "https://www.csa.iisc.ac.in/academics-all/courses/current/",                department: CSA, doc_type: schedule,   scope: public}
+  - {url: "https://www.csa.iisc.ac.in/academics-all/courses/upcoming/",               department: CSA, doc_type: catalogue,  scope: public}
+  - {url: "https://www.csa.iisc.ac.in/people-all/faculty/",                               department: CSA, doc_type: people,     scope: public}
+  - {url: "https://www.csa.iisc.ac.in/research/",                                     department: CSA, doc_type: research,   scope: public}
 
-# Bounded crawl of the CDS site (added 2026-10-08). The corpus is defined by the site's own links, not by
-# any question set. Pages listed above keep their doc_type and are never re-downloaded. Pages the crawl
-# finds are added with a doc_type inferred from their URL. See askiisc_retrieval/crawl.py for the rules.
+# Bounded crawl across both departments
+# Bounded crawl split into separate per-host crawl groups
 crawl:
-  seeds: ["https://cds.iisc.ac.in/"]
-  max_depth: 2        # clicks from the homepage
-  max_pages: 200      # hard cap (CPU embedding time grows with this)
-  delay_s: 0.5        # politeness delay between downloads
+  - seeds: ["https://cds.iisc.ac.in/"]
+    max_depth: 2
+    max_pages: 50
+    delay_s: 0.5
 
-# Follow links from public source pages during ingestion. Each host must be approved.
+  - department: CSA
+    seeds: ["https://www.csa.iisc.ac.in/"]
+    max_depth: 2
+    max_pages: 50
+    delay_s: 0.5
+
+# Approved host domains for following subpage links
 linked_pages:
   CDS:
     hosts: [cds.iisc.ac.in]
     from_types: [schedule, catalogue]
     doc_type: page
     max_pages: 12
+  CSA:
+    hosts: [csa.iisc.ac.in, www.csa.iisc.ac.in]
+    from_types: [schedule, catalogue, admissions]
+    doc_type: page
+    max_pages: 12
 
-# Synthetic test documents (fixtures/). These exist only to test filters; see fixtures/README.md.
 fixtures: fixtures/fixtures.yaml
