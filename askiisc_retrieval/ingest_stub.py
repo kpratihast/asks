@@ -88,6 +88,7 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
     """Real pages from data/raw/ plus the synthetic fixtures."""
     from .fetch import load_sources, raw_name
     from .config import RAW_DIR
+    from .departments import SHARED, source_departments
     src = load_sources()
     pages, missing = [], []
     for pg in src["pages"]:
@@ -95,8 +96,14 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
         if not f.exists():
             missing.append(pg["url"])
             continue
-        pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], pg["scope"],
-                               pg.get("department", src["department"])))
+        department = pg.get("department", src["department"])
+        body = f.read_bytes()
+        mode = pg.get("normalize")
+        if mode:
+            from .admissions import normalize_html
+            body = normalize_html(body, pg["url"], mode, source_departments(src["department"]))
+        pages.append(PageInput(pg["url"], body, pg["doc_type"], pg["scope"], department,
+                               tagged_departments=bool(mode and department == SHARED)))
     if missing:
         print(f"WARNING: {len(missing)} page(s) not fetched yet (run `fetch` first): {missing}")
     crawl_index = RAW_DIR / "crawl.json"

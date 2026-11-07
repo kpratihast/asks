@@ -30,6 +30,7 @@ SYSTEM = (
     "4. If evidence items conflict, say so and cite both.\n"
     "Keep each fact attached to its exact degree programme, department, entry route and admission cycle. "
     "Never transfer duration, eligibility, selection, fees or dates to a different department, programme or cycle. "
+    "For institute-wide admissions, give the common IISc steps and label any department-specific exceptions explicitly. "
     "For email questions use the published address of the person asked about. Never infer an address from a name. "
     "Course M.Tech. and M.Tech. (Research) are separate programmes. A fact for one cannot fill a gap for the other. "
     "If the requested programme/cycle lacks the requested fact, abstain under rule 3.\n"

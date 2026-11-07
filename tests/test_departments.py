@@ -9,6 +9,7 @@ from askiisc_retrieval.admissions import normalize_html
 from askiisc_retrieval.departments import mentioned
 from askiisc_retrieval.ingest_stub import PageInput, build_index, load_page_inputs
 from askiisc_retrieval.private_documents import DocumentCatalog
+from askiisc_retrieval.query_analysis import analyse, institute_admissions
 from askiisc_retrieval.retriever import Retriever
 from askiisc_retrieval.snapshot import JsonSnapshotProvider, StaticSnapshotProvider
 from askiisc_retrieval.stores import HashEmbedder, JsonGraphStore, QdrantStore
@@ -110,6 +111,63 @@ def test_unqualified_programme_requests_clarification(mixed_retriever):
         response = ask(client, q='What is the M.Tech. selection process?')
     assert response.json()['reason'] == 'department_required'
     assert not model.requests
+
+
+@pytest.mark.parametrize('query', [
+    'How do I apply for a research programme at IISc?',
+    'Where is the application portal?',
+    'What are the M.Tech admission routes at the Indian Institute of Science?',
+])
+@pytest.mark.parametrize('use_graph', [False, True])
+def test_institute_admissions_only_uses_institute_passages(mixed_retriever, query, use_graph):
+    result = mixed_retriever.retrieve(query, ['public'], use_graph=use_graph)
+    assert result.department_status == 'institute_admissions'
+    assert result.passages and {p.chunk.department for p in result.passages} == {'IISc'}
+    assert all(c.department == 'IISc' for c in result.citations)
+
+
+def test_institute_question_does_not_fall_back_to_the_only_indexed_department(tmp_path):
+    embedder = HashEmbedder()
+    store = QdrantStore('single-dept', embedder.dim, path=tmp_path/'q')
+    graph_path, snapshot_path = tmp_path/'graph.json', tmp_path/'snapshot.json'
+    body = '<main><h1>CDS research admissions</h1><p>' + ('Applicants apply to the CDS programme. ' * 4) + '</p></main>'
+    try:
+        build_index([PageInput('https://cds.example.test/research/', body, 'admissions', 'public')],
+                    embedder, store, graph_path, snapshot_path)
+        retriever = Retriever(embedder, store, JsonSnapshotProvider(snapshot_path), JsonGraphStore.load(graph_path))
+        model = FakeModel('An answer should never be generated [S1].')
+        with make(model, retrieval=LocalRetrieval(retriever))[0] as client:
+            for mode in ('full', 'vector'):
+                result = ask(client, q='How do I apply for a research programme?', mode=mode).json()
+                assert result['status'] == 'abstained' and not result['citations']
+        assert not model.requests
+    finally:
+        store.close()
+
+
+def test_non_admissions_and_named_department_questions_keep_their_scope():
+    for question in ('How do I apply to ECE at IISc?', 'Which IISc labs work on applications of AI?'):
+        assert not institute_admissions(analyse(question))
+
+
+def test_seed_admissions_normalization_keeps_shared_and_department_sections_separate(tmp_path, monkeypatch):
+    from askiisc_retrieval.parse import parse_html
+
+    url = 'https://example.test/admissions/'
+    profile = tmp_path / 'sources.yaml'
+    profile.write_text(f'''department: CDS
+pages:
+  - {{url: '{url}', department: IISc, doc_type: admissions, scope: public, normalize: programmes}}
+''')
+    monkeypatch.setenv('ASKIISC_SOURCES_FILE', str(profile))
+    monkeypatch.setenv('ASKIISC_SOURCE_DEPARTMENTS', 'ECE')
+    monkeypatch.setattr(config, 'RAW_DIR', tmp_path)
+    monkeypatch.setattr(DocumentCatalog, 'page_inputs', lambda self: [])
+    (tmp_path / fetch.raw_name(url)).write_text(PANELS)
+    [page] = load_page_inputs(False)
+    parsed = parse_html(url, page.html, tagged_departments=page.tagged_departments)
+    assert {section.department or page.department for section in parsed.sections} == {'IISc', 'ECE'}
+    assert 'written test is mandatory' not in page.html
 
 
 def test_compare_uses_both_departments_and_rejects_one_sided_citation(mixed_retriever):

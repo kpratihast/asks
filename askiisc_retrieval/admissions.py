@@ -93,7 +93,7 @@ def normalize_html(body,url,mode,departments=(DEFAULT,)):
                 missing = expected - {code for code, _ in kept.values()}
                 if missing:
                     raise ValueError(f'{", ".join(sorted(missing))} programme panel missing; source format needs review')
-                found |= bool(kept)
+                found = True
                 for node in list(panels.children):
                     if isinstance(node,Tag):
                         if match := kept.get(id(node)):
@@ -109,24 +109,23 @@ def normalize_html(body,url,mode,departments=(DEFAULT,)):
                 for label_tag,tab in zip(labels,tabs):
                     heading=main.new_tag('h2');heading.string=text(label_tag);tab.insert(0,heading)
             listing.decompose()
-        if not found:raise ValueError('No configured department programme panel found')
+        if not found:raise ValueError('No department programme panels recognized')
         # Empty headings above department tabs should not label the common rules.
         for heading in list(main.find_all(['h1','h2'])):
             if re.fullmatch(r'Ph\.?D\.? Science\s*\*?', text(heading), re.I):heading.decompose()
     if mode=='cfti':
         container = main.find('div',class_='col-md-9')
-        active, found = True, False
+        if not container.find('h2', recursive=False):
+            raise ValueError('No CFTI department headings recognized')
+        active = True
         for node in list(container.children):
             if isinstance(node,Tag) and node.name=='h2':
                 code = owner(text(node))
                 active = bool(code)
                 if code:
                     node["data-askiisc-department"] = code
-                    found = True
             if not active:
                 node.extract()
-        if not found:
-            raise ValueError('No configured CFTI department panel found')
     if mode=='fees':
         for i,table in enumerate(list(main.find_all('table'))):
             if i==0:

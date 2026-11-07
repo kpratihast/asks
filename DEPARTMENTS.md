@@ -30,6 +30,6 @@ If the cluster uses `ASKIISC_BACKEND=ingestion`, configure the external ingestio
 
 ## Routing
 
-A named department gets its own candidates plus shared institute evidence. Requests naming multiple departments get candidates separately for each and require citations for each side. Graph traversal is limited to one resolved department in a mixed corpus so an unrelated department cannot supply a join. Open campus queries and cross-department comparisons use vector retrieval. Ambiguous programme policy questions ask which department the user means. The department names and aliases apply to question routing and public versus restricted login hints. Existing per-chunk scopes still enforce access.
+General admissions questions use evidence tagged `IISc`. If the index has no relevant institute source, the app abstains. A named department gets its own candidates plus shared institute evidence. Requests naming multiple departments get candidates separately for each and require citations for each side. Graph traversal stays within the resolved department or institute scope. Other open campus queries and cross-department comparisons use vector retrieval. Ambiguous programme policy questions ask which department the user means. The department names and aliases apply to question routing and public versus restricted login hints. Per-chunk scopes enforce access.
 
 The graph rules version changed. For AWS use a full bundle with a newly built index. The code-only deployment path retains its previous data and cannot publish the new graph or sources.

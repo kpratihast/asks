@@ -30,6 +30,8 @@ export ASKIISC_PRIVATE_MANIFEST="$PWD/.local/public-documents.json"
 
 Replace `askiisc` with the model ID your server reports. Open <http://127.0.0.1:8100>. If the model is unavailable, the app can return matching source excerpts.
 
+The default source list includes the official IISc research admissions, M.Tech. and M.Des., CFTI entry, and admissions FAQ pages. General admissions questions use institute sources. Name a department to ask about its own requirements. For an existing index, stop the app and run `./run-local.sh --refresh` to fetch the configured pages and rebuild it.
+
 ## Add sources
 
 Add reviewed URLs to [sources.yaml](sources.yaml). Enable departments with `ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE`. Add a new department code and its names to [config/departments.yaml](config/departments.yaml). Use a fresh data directory to test the resulting index before switching the app. [Department and cluster setup](DEPARTMENTS.md)

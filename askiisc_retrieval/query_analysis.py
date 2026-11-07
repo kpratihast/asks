@@ -20,6 +20,11 @@ PEOPLE_INTENT = re.compile(
     r"\b(who|whom|whose|anyone|anybody|someone|somebody)\b|\b(professors?|prof|faculty|advisors?|advisers?|supervisors?|guides?|mentors?|"
     r"labs?|research groups?|groups?)\b", re.I)
 THIS_TERM = re.compile(r"\b(this|current|ongoing|present)\s+(semester|term|session)\b|\bcurrently\b|\bright now\b", re.I)
+INSTITUTE = re.compile(r"\b(?:IISc|Indian Institute of Science|institute[- ]wide|across (?:all )?departments)\b", re.I)
+ADMISSIONS = re.compile(r"\badmissions?\b|\bapplication (?:portal|fee|deadline|form|process)\b", re.I)
+APPLICATION = re.compile(r"\b(?:apply|applying|applications?|applicants?|admitted)\b", re.I)
+ACADEMIC_APPLICATION = re.compile(r"\b(?:programmes?|programs?|degrees?|postgraduate|undergraduate)\b", re.I)
+APPLY_TO_INSTITUTE = re.compile(r"\b(?:apply|applying)\s+(?:to|at)\s+(?:the\s+)?(?:IISc|Indian Institute of Science)\b", re.I)
 
 
 def term_key(term: str) -> tuple[int, int]:
@@ -65,6 +70,24 @@ def analyse(query: str, today_term: str | None = None) -> QueryInfo:
         term = now
     return QueryInfo(query, codes, term, term or now, bool(PEOPLE_INTENT.search(query)), mentioned(query))
 
+
+def institute_admissions(info: QueryInfo) -> bool:
+    """General admissions rules come from institute sources, even in a one-department index."""
+    if info.departments or info.course_codes:
+        return False
+    from .policy_graph import programmes, requested_facets
+
+    query = info.query
+    institute = INSTITUTE.search(query)
+    if ADMISSIONS.search(query) or APPLY_TO_INSTITUTE.search(query):
+        return True
+    degree = programmes(query)
+    if APPLICATION.search(query) and (degree or ACADEMIC_APPLICATION.search(query)):
+        return True
+    return bool(institute and degree and set(requested_facets(query)) & {
+        "ELIGIBILITY", "SELECTION", "QUOTA", "INTAKE", "FEES", "FUNDING_AMOUNT", "FUNDING_CONDITIONS",
+        "APPLICATION_DEADLINE", "INTERVIEW_DATES", "SESSION_START",
+    })
 
 
 def public_entrance_exam_context(query: str) -> bool:

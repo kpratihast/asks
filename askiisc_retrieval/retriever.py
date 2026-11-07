@@ -23,7 +23,7 @@ from concurrent.futures import TimeoutError as FutTimeout
 from . import config
 from .contract import ChunkPayload, Passage, RetrievalResult
 from .departments import DEFAULT, SHARED, course_department
-from .query_analysis import QueryInfo, analyse, term_key, requested_relations
+from .query_analysis import QueryInfo, analyse, institute_admissions, term_key, requested_relations
 
 
 def _tkey(term: str | None) -> tuple[int, int]:
@@ -81,10 +81,15 @@ class Retriever:
         campus = set(snap.departments) - {SHARED}
         if not departments and len(campus) > 1 and (owner := course_department(info.course_codes)):
             departments = (owner,)
+        shared_admissions = institute_admissions(info) and not self.document_catalog.matching(query)
+        allowed_departments = (SHARED,) if shared_admissions else (*departments, SHARED) if departments else ()
         graph_departments = None
         graph_route = None
         clarification = False
-        if len(departments) == 1:
+        if shared_admissions:
+            graph_departments = (SHARED,)
+            graph_route = "institute_admissions"
+        elif len(departments) == 1:
             graph_departments = departments
             if departments == (DEFAULT,) and not campus - {DEFAULT}:
                 graph_departments = (*departments, None)  # graphs from existing CDS-only releases
@@ -110,7 +115,7 @@ class Retriever:
 
         # Search each named department independently so a large department cannot
         # use up the candidate budget before smaller departments are searched.
-        routes = [(dept,) for dept in (*departments, SHARED)] if departments else [None]
+        routes = [(dept,) for dept in allowed_departments] or [None]
 
         def search(k, **filters):
             found = {}
@@ -122,7 +127,8 @@ class Retriever:
                     found.setdefault(chunk.chunk_id, (chunk, score))
             return list(found.values())
 
-        hits = search(self.candidates)
+        initial_filters = {"doc_types": ["admissions", "policy"]} if shared_admissions else {}
+        hits = search(self.candidates, **initial_filters)
         via = {c.chunk_id: "vector" for c, _ in hits}
         if info.course_codes:
             for c, score in search(self.candidates, course_codes=info.course_codes):
@@ -130,7 +136,7 @@ class Retriever:
                     hits.append((c, score))
                     via[c.chunk_id] = "course_code"
         people_hits = []
-        if info.wants_people and self.people_k:
+        if info.wants_people and self.people_k and not shared_admissions:
             people_hits = search(self.people_k, doc_types=list(config.PEOPLE_DOC_TYPES))
         if departments:
             from .policy_graph import programmes
@@ -230,13 +236,12 @@ class Retriever:
                 degraded, reason = True, f"link graph error: {type(exc).__name__}"
         # Explicit document questions must retain the authorized document, even when exact
         # course matches otherwise crowd the identifier-free exam lookup out of top-k.
-        targeted = self._document_passages(info, snap, scopes)
+        targeted = [] if shared_admissions else self._document_passages(info, snap, scopes)
         have = {p.chunk.chunk_id for p in targeted}
         passages = targeted + [p for p in passages if p.chunk.chunk_id not in have]
         if proof_passages:
             proved = {p.chunk.chunk_id for p in proof_passages}
             passages = proof_passages + [p for p in passages if p.chunk.chunk_id not in proved]
-        allowed_departments = (*departments, SHARED) if departments else ()
         passages = self._audit(passages, snap.active_version_ids, scopes, snap.embedding_model, allowed_departments)
         passages = self._cover_departments(passages, departments if len(departments) > 1 else (),
                                            lambda passage: passage.chunk.department)

@@ -4,6 +4,10 @@
 # Default scope is CDS. Enable others with ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE.
 department: CDS
 pages:
+  - {url: "https://www.iisc.ac.in/admissions/research-programmes/", department: IISc, doc_type: admissions, scope: public, normalize: programmes}
+  - {url: "https://www.iisc.ac.in/admissions/m-tech-m-des/",         department: IISc, doc_type: admissions, scope: public, normalize: programmes}
+  - {url: "https://www.iisc.ac.in/admissions/m-tech-through-cfti-mode-2/", department: IISc, doc_type: admissions, scope: public, normalize: cfti}
+  - {url: "https://www.iisc.ac.in/admissions/faq/",                 department: IISc, doc_type: admissions, scope: public, normalize: faq}
   - {url: "https://cds.iisc.ac.in/courses/descriptions/",               doc_type: catalogue,  scope: public}
   - {url: "https://cds.iisc.ac.in/courses/schedule/",                   doc_type: schedule,   scope: public}
   - {url: "https://cds.iisc.ac.in/courses/m-tech-course-requirements/", doc_type: policy,     scope: public}
