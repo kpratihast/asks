@@ -11,7 +11,9 @@ import re
 
 from .contract import Passage
 
+from .parse import course_codes
 from .query_analysis import course_exam_intent
+from .scheduling import exam_lookup, fields
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,34 @@ def plan_for(info, graph, *, departments=None):
         if people:
             return ConnectionPlan(tuple(people),('^TAUGHT_BY',)+tail,info.target_term,answer_relation)
     return None
+
+
+def vector_exam_evidence(info, passages):
+    """A slot-based table alone cannot establish a named course's exam in vector mode."""
+    requested = set(info.course_codes)
+    by_instructor = re.search(r'\b(?:teach(?:es)?|taught|instructor|professor)\b', info.query, re.I)
+    if not (requested or by_instructor) or not course_exam_intent(info.query):
+        return passages, None
+    has_slot_lookup = False
+    direct_courses = set()
+    direct_passages = []
+    venue = bool(re.search(r'\b(?:where|venue|room|location)\b', info.query, re.I))
+    labels = ('examination venue', 'exam venue') if venue else ('final examination date', 'exam date')
+    for passage in passages:
+        chunk = passage.chunk
+        if chunk.doc_type not in {'schedule', 'calendar'} or chunk.academic_term != info.target_term:
+            continue
+        if exam_lookup(chunk.text, chunk.academic_term):
+            has_slot_lookup = True
+            continue
+        row = fields(chunk.text)
+        codes = requested.intersection(course_codes((row.get('course id') or row.get('course code') or '').upper()))
+        if codes and any(row.get(label) for label in labels):
+            direct_courses.update(codes)
+            direct_passages.append(passage)
+    if requested and requested <= direct_courses:
+        return direct_passages, None
+    return passages, 'unverified_path' if has_slot_lookup else None
 
 
 def bounded_paths(edges, starts, relations, version_ids, scopes, term, *, max_states=1024, max_paths=128):

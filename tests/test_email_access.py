@@ -200,6 +200,10 @@ def test_professor_can_access_all_scopes_after_verification(stack, auth, email):
     response = c.post('/v1/ask', json={'question': 'What is the final examination date for DS252?'})
     assert response.status_code == 200 and response.json()['status'] == 'answered'
     assert 'FACULTY_SECRET_DATE' in json.dumps(model.requests)
+    calls = len(model.requests)
+    vector = c.post('/v1/ask', json={'question': 'What is the final examination date for DS252?', 'mode': 'vector'})
+    assert vector.json()['status'] == 'abstained' and vector.json()['trace']['connection_status'] == 'unverified_path'
+    assert len(model.requests) == calls
     for scope in ['public', 'student', 'faculty']:
         assert r.retrieve('DS252', [scope]).passages
 

@@ -13,4 +13,4 @@ neo4j>=5.20
 psycopg2-binary>=2.9.9
 
 # Optional offline PDF import for classified documents
-pypdf>=6.21.4,<7
+pypdf>=7.0.0,<8

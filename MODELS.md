@@ -34,6 +34,8 @@ The BF16 checkpoints are unquantized. The quantized profiles use MLX's 4-bit che
 format on Apple Silicon. The CUDA deployment's AWQ/Marlin profile remains in
 `deploy/vllm_variants.sh`; it is not the format used by this Mac switcher.
 
+The CUDA launcher binds to loopback by default. To run the gateway and model on separate hosts, bind vLLM to its private interface with `ASKIISC_VLLM_HOST`, set `VLLM_API_KEY` for the model and set `MODEL_API_KEY` for the gateway. Restrict network access to the gateway. The key protects only some vLLM routes, so keep the server behind the private network or a proxy. Use a release that includes the upstream API authentication fix. [vLLM security guidance](https://docs.vllm.ai/en/stable/usage/security/) · [vLLM authentication advisory](https://github.com/vllm-project/vllm/security/advisories/GHSA-94f4-hr76-p5j6)
+
 The BF16 8B weights alone occupy about 16 GB. This is a tight configuration on a 24 GB
 Mac: close other memory-heavy applications first, and use `8b-quantized` for routine
 local work. Memory fractions are starting budgets, not guarantees that every workload

@@ -18,6 +18,21 @@ This review hardens the public chat and document-access boundaries. It is not a 
 | Upstream resource use | A trickling model could evade individual read timeouts | Overall generation deadline and bounded output size |
 | Dependencies | pypdf 6.18.1 had published denial-of-service advisories | Upgrade local, AWS and CI requirements to 6.21.4 with PyPI SHA-256 release hashes |
 
+## Submission review
+
+| Finding | Fix |
+|---|---|
+| A malformed citation URL returned 500 and occupied the only generation slot indefinitely. A queued client disconnect could also strand capacity until timeout. | Invalid source URLs are dropped. The HTTP request releases the slot on completion, failure or disconnect, including before an SSE response starts. |
+| An OpenRouter key from the environment was sent to a different model endpoint. Authorized restricted evidence could also reach the hosted model. | The OpenRouter environment key is sent only to the OpenRouter HTTPS origin. Restricted generation requires loopback or an exact trusted self-hosted endpoint. Hosted endpoints can serve public evidence. |
+| A remote citation could claim a different URL or version from its passage. A local snapshot change during a pinned read could return a different snapshot. | The gateway checks passage provenance before formatting it and verifies the snapshot pin again after retrieval. Encoded and normalized private paths are checked against the current catalogue. |
+| A real vector answer cited both exam documents but joined the wrong teaching slot to the exam date. | A slot-based exam answer needs a verified connection unless a source states the exam details against the course directly. |
+| Upstream error or reasoning events could consume memory outside the answer limit. A token-limit finish could pass citation checks and expose a truncated answer. | The gateway caps the complete SSE response and requires a normal stop before sending answer text. |
+| A full release could copy the contents of a source symlink. Code-only packaging could combine a new graph implementation with an incompatible snapshot. | Both package paths reject source links. Full packaging and code-only composition check the snapshot against the graph rules before producing a release. |
+| The CUDA launcher bound vLLM to every interface by default. | The launcher defaults to loopback. Other interfaces require an API key and operator-controlled private networking. |
+| pypdf 6.21.4 is affected by newly published issues. | The local, AWS and CI requirements now use pypdf 7.0.0 or later within major version 7. The AWS and CI pins use the published 7.0.0 hashes. |
+
+The focused regression suite covers the cases above using synthetic protected evidence and local model fixtures. The public model checks use published IISc pages. [pypdf advisory on cross-reference streams](https://github.com/py-pdf/pypdf/security/advisories/GHSA-59jv-x5x2-gg4c) · [pypdf advisory on XFA forms](https://github.com/py-pdf/pypdf/security/advisories/GHSA-cmpx-464x-82c3)
+
 The full/vector modes, public chat, email OTP flow, role hierarchy, faculty test override and configured admission limits remain available. Streaming now shows the verified answer after generation rather than displaying unverified draft tokens. Protected originals download instead of rendering inline.
 
 ## Repeatable tests
@@ -42,12 +57,12 @@ On 6 November 2026 the audit found 21 advisory entries for pypdf 6.18.1. After t
 
 ## Assessment boundaries and remaining risks
 
-- The explicitly requested professor test override remains enabled on AWS. That address gains faculty access only after OTP verification. It is an intentional exception to directory-based role assignment and should be disclosed to the evaluator.
+- The repository defaults to an empty professor test override. Existing AWS releases keep their captured runtime settings until a fresh release is activated. An explicitly configured test address gains faculty access after OTP verification.
 - IISc email ownership is not proof of current enrollment. Non-faculty IISc accounts receive the student role under the requested design; stronger verification requires an institute-managed identity directory.
 - Prompt filters are defense in depth. A novel/obfuscated injection or a factually wrong answer with valid citation markers can still evade these checks. Citation validation checks references and required connected sources, not semantic entailment. No secrets, tools, shell or arbitrary URL-fetch capability are provided to the model. [OWASP prompt-injection guidance](https://genai.owasp.org/llmrisk/llm01-prompt-injection/).
 - Document classification is an operator responsibility. Publicly published facts may overlap private attachments; protecting the attachment cannot make independently public facts secret. Rebuild and validate a new immutable snapshot when changing documents or permissions.
 - Rate limits cap resource consumption but cannot guarantee availability against distributed denial-of-service or prevent an attacker from using the permitted anonymous/OTP quota. No paid WAF or new AWS infrastructure is introduced.
-- Authorized restricted-document questions send their selected evidence to the configured model provider. Use the local model for workloads that must not leave the institution. Provider privacy settings are not a substitute for institutional approval.
+- Restricted evidence stays on loopback or the exact private endpoint named by `ASKIISC_TRUSTED_MODEL_URL`. The app returns authorized excerpts and document links when the configured model is untrusted. Hosted models still receive the public evidence and question for public answers.
 - SMTP/model keys previously pasted into chat should be rotated through their providers before formal testing and updated through the private runtime configuration. Do not store replacement secrets in Git or reports.
 - The named deployer cannot read security-group rules or the S3 public-access-block configuration. Host inspection and bounded external probes provide partial evidence only; an administrator should verify the actual policy settings and account MFA. Do not use root credentials for routine deployment.
 

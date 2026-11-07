@@ -2,7 +2,7 @@
 from __future__ import annotations
 import hashlib,json,re,shutil,tarfile
 from pathlib import Path,PurePosixPath
-from release_lib import sha,unpack,verify_tree,valid_id
+from release_lib import sha,unpack,verify_tree,valid_id,require_graph_version
 
 SUFFIXES={'.py','.html','.css','.js','.svg','.png','.webp','.ico','.woff2'}
 DEPLOY_NAMES={'awsctl.py','release_lib.py','host.py','runtime.py','model_config.py','model_profiles.py',
@@ -24,7 +24,7 @@ def validate_code(tree):
     m=verify_tree(tree)
     if m.get('kind')!='code' or not re.fullmatch('[0-9a-f]{40}',m.get('git_sha','')):raise ValueError('Expected a code-only commit archive')
     if not all(allowed(n) for n in m['files']):raise ValueError('Code archive contains a forbidden path')
-    required={'askiisc_retrieval/__init__.py','askiisc_serving/__init__.py',
+    required={'askiisc_retrieval/__init__.py','askiisc_retrieval/graph_rules.py','askiisc_serving/__init__.py',
               'config/restricted_documents.json','config/faculty_directory.json',
               'deploy/aws/host.py','deploy/aws/release_lib.py','deploy/aws/runtime.py','deploy/aws/requirements.lock'}
     if not required<=m['files'].keys():raise ValueError('Code archive is incomplete')
@@ -65,7 +65,9 @@ def package(root,tree,git_sha,release_id):
 
 def compose(base,code,target):
     base=Path(base);code=Path(code);target=Path(target)
-    old=verify_tree(base);new=validate_code(code);target.mkdir(mode=0o700)
+    old=verify_tree(base);new=validate_code(code)
+    require_graph_version(code,json.loads((base/'data/snapshot.json').read_text()))
+    target.mkdir(mode=0o700)
     retained=[n for n in old['files'] if n.startswith(('data/','assets/','.local/private/'))]
     if not any(n.startswith('data/') for n in retained) or not any(n.startswith('assets/') for n in retained):raise ValueError('Base release lacks corpus/model assets')
     for source,names in [(base,retained),(code,list(new['files']))]:

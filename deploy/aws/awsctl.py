@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.request import urlopen,Request
 from urllib.error import HTTPError
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from release_lib import MODEL,sha,sqlite_copy,verify_tree,unpack,valid_id,hostname,runtime_config
+from release_lib import MODEL,sha,sqlite_copy,verify_tree,unpack,valid_id,hostname,runtime_config,require_graph_version
 HERE=Path(__file__).resolve().parent;ROOT=HERE.parent.parent
 DEPLOY_FILES={'ci.py','ci_bundle.py','ci_host.py','ci_setup.py','GITHUB_DEPLOYMENT.md','model_profiles.py','model-profiles.example.json','deploy_latest.py','awsctl.py','release_lib.py','host.py','runtime.py','model_config.py','iam_bootstrap.py','render_stack.py','bootstrap.sh','stack.json','requirements.in','requirements.lock','README.md','runtime.example.json','deployer-policy.example.json'}
 SOURCE_SUFFIXES={'.py','.html','.css','.js','.svg','.png','.webp','.ico','.woff2'}
@@ -19,6 +19,7 @@ def package(root,data,out,model_dir=None,release_id=None):
     root=Path(root).resolve();data=Path(data).resolve();out=Path(out).resolve()
     snap=json.loads((data/'snapshot.json').read_text())
     if snap['embedding_model']!=MODEL:raise ValueError('This deployment profile requires the current BGE-small index')
+    require_graph_version(root,snap)
     frozen={n:sha(data/n) for n in ['snapshot.json','chunks.jsonl','graph.json','qdrant/meta.json']}
     private=json.loads((root/'config/restricted_documents.json').read_text())
     if model_dir is None:
@@ -30,7 +31,10 @@ def package(root,data,out,model_dir=None,release_id=None):
     with tempfile.TemporaryDirectory(prefix='.aws-package-',dir=out) as tmp:
         tree=Path(tmp)/'release';tree.mkdir()
         for directory in ['askiisc_retrieval','askiisc_serving']:
-            for p in (root/directory).rglob('*'):
+            source=root/directory
+            if source.is_symlink():raise ValueError('Application source links are not allowed')
+            for p in source.rglob('*'):
+                if p.is_symlink():raise ValueError('Application source links are not allowed')
                 if p.is_file() and '__pycache__' not in p.parts and p.suffix in SOURCE_SUFFIXES:copy(p,tree/p.relative_to(root))
         for p in HERE.iterdir():
             if p.is_file() and p.name in DEPLOY_FILES:

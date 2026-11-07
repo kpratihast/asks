@@ -1,11 +1,12 @@
 """Portable release integrity, packaging and deployment validation (standard library only)."""
 from __future__ import annotations
-import hashlib,json,math,re,sqlite3,tarfile
+import ast,hashlib,json,math,re,sqlite3,tarfile
 from pathlib import Path,PurePosixPath
 from urllib.parse import urlsplit
 
 MODEL='BAAI/bge-small-en-v1.5'
 CONFIG_KEYS={'VLLM_URL','SERVED_MODEL','MODEL_API_KEY','MODEL_REASONING','MODEL_PROVIDER_PREFERENCES','CHAT_TEMPLATE_KWARGS',
+             'ASKIISC_TRUSTED_MODEL_URL',
              'MAX_MODEL_LEN','MAX_OUTPUT_TOKENS','EMAIL_AUTH_ENABLED','AUTH_PROFESSOR_TEST_EMAILS',
              'SMTP_HOST','SMTP_PORT','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM','RATE_PER_MIN','GLOBAL_CONCURRENCY','TENANT_CONCURRENCY','TENANT_QUEUE','QUEUE_WAIT_S'}
 
@@ -24,6 +25,16 @@ def hostname(value):
         raise ValueError('Use a public DNS hostname you control, without scheme or path')
     return value.lower()
 
+def require_graph_version(root, snapshot):
+    # Read the version without importing code from an incoming release as root.
+    path=Path(root)/'askiisc_retrieval/graph_rules.py'
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node,ast.Assign) and any(isinstance(name,ast.Name) and name.id=='GRAPH_RULES_VERSION' for name in node.targets):
+            if isinstance(node.value,ast.Constant) and isinstance(node.value.value,str) and node.value.value==snapshot.get('graph_version'):
+                return
+            break
+    raise ValueError('Graph rules differ from the index. Rebuild and package a full release.')
+
 def runtime_config(raw):
     if not isinstance(raw,dict) or set(raw)-CONFIG_KEYS:raise ValueError('Runtime config contains unsupported keys')
     out={'MAX_MODEL_LEN':4096,'MAX_OUTPUT_TOKENS':512,'EMAIL_AUTH_ENABLED':True,
@@ -31,6 +42,13 @@ def runtime_config(raw):
     u=urlsplit(out.get('VLLM_URL',''))
     if u.scheme!='https' or not u.hostname or u.username or u.password or u.query or u.fragment:
         raise ValueError('AWS model endpoint must be an HTTPS base URL without credentials/query')
+    trusted=out.get('ASKIISC_TRUSTED_MODEL_URL','')
+    if not isinstance(trusted,str):raise ValueError('Trusted model endpoint must be a URL string')
+    if trusted:
+        t=urlsplit(trusted)
+        if (t.scheme!='https' or not t.hostname or t.username is not None or t.query or t.fragment
+                or t.hostname.rstrip('.')=='openrouter.ai' or any(c.isspace() for c in trusted)):
+            raise ValueError('Trusted model endpoint must be a private, self-hosted HTTPS base URL')
     if not isinstance(out.get('SERVED_MODEL'),str) or not out['SERVED_MODEL'].strip():raise ValueError('Set SERVED_MODEL explicitly')
     for k in ['MODEL_REASONING','MODEL_PROVIDER_PREFERENCES','CHAT_TEMPLATE_KWARGS']:
         if not isinstance(out[k],dict):raise ValueError(k+' must be an object')
@@ -75,15 +93,17 @@ def verify_tree(root):
 def unpack(archive,target):
     target=Path(target);target.mkdir(mode=0o700)
     with tarfile.open(archive,'r:gz') as t:
-        members=t.getmembers()
-        if len(members)>10000 or sum(m.size for m in members)>4*1024**3:raise ValueError('Release exceeds extraction limits')
-        names=set()
-        for m in members:
+        members=[];names=set();size=0
+        for m in t:
+            size+=m.size
+            if len(members)>=10000 or size>4*1024**3:raise ValueError('Release exceeds extraction limits')
             rel=PurePosixPath(m.name)
-            if rel.is_absolute() or '..' in rel.parts or '\\' in m.name or not(m.isfile() or m.isdir()):raise ValueError('Unsafe archive member')
-            if m.name in names:raise ValueError('Duplicate archive member')
-            names.add(m.name)
-        t.extractall(target,filter='data')
+            if not rel.parts or rel.is_absolute() or '..' in rel.parts or '\\' in m.name or not(m.isfile() or m.isdir()):
+                raise ValueError('Unsafe archive member')
+            name=rel.as_posix()
+            if name in names:raise ValueError('Duplicate archive member')
+            names.add(name);members.append(m)
+        t.extractall(target,members=members,filter='data')
     return verify_tree(target)
 
 def sqlite_copy(source,target):

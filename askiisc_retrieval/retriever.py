@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutTimeout
 
 from . import config
+from .connections import vector_exam_evidence
 from .contract import ChunkPayload, Passage, RetrievalResult
 from .departments import DEFAULT, SHARED, course_department
 from .query_analysis import QueryInfo, analyse, institute_admissions, term_key, requested_relations
@@ -245,6 +246,8 @@ class Retriever:
         passages = self._audit(passages, snap.active_version_ids, scopes, snap.embedding_model, allowed_departments)
         passages = self._cover_departments(passages, departments if len(departments) > 1 else (),
                                            lambda passage: passage.chunk.department)
+        if not use_graph:
+            passages, connection_status = vector_exam_evidence(info, passages)
         missing_departments = set(departments) - {p.chunk.department for p in passages}
         timings["total"] = round((time.perf_counter() - t0) * 1000, 1)
         scores = [p.rerank_score for p in passages if p.rerank_score is not None]

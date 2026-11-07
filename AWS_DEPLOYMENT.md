@@ -201,6 +201,8 @@ The command prints parameter version metadata, not its value. The instance reads
 
 AWS configurations default to email authentication enabled and an empty professor test override. Set `AUTH_PROFESSOR_TEST_EMAILS` in the private runtime JSON to an exact IISc address only when testing. The address still needs OTP verification. Set the value to an empty string and deploy a fresh release to remove the override. Set `EMAIL_AUTH_ENABLED` to `false` for public-only mode; this does not unlock restricted content.
 
+To enable restricted generation, set `ASKIISC_TRUSTED_MODEL_URL` in the private runtime JSON to the exact HTTPS base URL of the private self-hosted inference service. Switching `VLLM_URL` to a different endpoint removes that endpoint's eligibility for restricted generation. OpenRouter handles public evidence only. Authorized users can still read restricted excerpts and original documents with a hosted model selected.
+
 ### Switch AWS models from one local command
 
 The Desktop workspace has a non-secret profile file at `/Users/kshitij/Desktop/askiisc/aws-models.json` and a wrapper at `/Users/kshitij/Desktop/askiisc/model-aws.sh`:

@@ -9,7 +9,9 @@ from __future__ import annotations
 import os
 import json
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _f(name: str, default: float) -> float:
@@ -27,12 +29,26 @@ def _b(name: str, default: bool) -> bool:
     return value in {'1', 'true', 'yes', 'on'}
 
 
+def _model_base(value: str) -> str:
+    base = value.rstrip("/").removesuffix("/v1")
+    url = urlsplit(base)
+    if (url.scheme not in {"http", "https"} or not url.hostname
+            or url.username is not None or url.query or url.fragment
+            or any(char.isspace() for char in value)):
+        raise ValueError("Model endpoints must be HTTP(S) base URLs without credentials, queries or fragments")
+    if url.port is not None and url.port < 1:
+        raise ValueError("Invalid model endpoint port")
+    return base
+
+
 @dataclass
 class Settings:
     # model endpoint (vLLM on the GPU; Ollama on a laptop: same OpenAI-compatible API)
     vllm_url: str = field(default_factory=lambda: os.environ.get("VLLM_URL", "http://127.0.0.1:8000"))
     served_model: str = field(default_factory=lambda: os.environ.get("SERVED_MODEL", "meta-llama/Llama-3.2-3B-Instruct"))
-    model_api_key: str | None = field(default_factory=lambda: os.environ.get("MODEL_API_KEY") or os.environ.get("OPENROUTER_API_KEY"), repr=False)
+    model_api_key: str | None = field(default_factory=lambda: os.environ.get("MODEL_API_KEY"), repr=False)
+    trusted_model_url: str = field(default_factory=lambda: os.environ.get("ASKIISC_TRUSTED_MODEL_URL", ""))
+    restricted_generation: bool = field(init=False)
     model_reasoning: dict = field(default_factory=lambda: json.loads(os.environ.get("MODEL_REASONING", "{}")))
     model_provider_preferences: dict = field(default_factory=lambda: json.loads(os.environ.get("MODEL_PROVIDER_PREFERENCES", "{}")))
     max_model_len: int = field(default_factory=lambda: _i("MAX_MODEL_LEN", 8192))
@@ -75,7 +91,17 @@ class Settings:
             raise ValueError("MODEL_REASONING must be a JSON object")
         if not isinstance(self.model_provider_preferences, dict):
             raise ValueError("MODEL_PROVIDER_PREFERENCES must be a JSON object")
-        self.vllm_url = self.vllm_url.rstrip("/").removesuffix("/v1")
+        self.vllm_url = _model_base(self.vllm_url)
+        url = urlsplit(self.vllm_url)
+        if self.model_api_key is None and (url.scheme, url.hostname, url.port or 443) == ("https", "openrouter.ai", 443):
+            self.model_api_key = os.environ.get("OPENROUTER_API_KEY")
+        try:
+            loopback = ip_address(url.hostname).is_loopback
+        except ValueError:
+            loopback = url.hostname == "localhost"
+        trusted_base = _model_base(self.trusted_model_url) if self.trusted_model_url else ""
+        self.restricted_generation = (url.hostname.rstrip(".") != "openrouter.ai"
+                                      and (loopback or trusted_base == self.vllm_url))
         if self.max_output_tokens < 1 or self.prompt_safety_tokens < 0:
             raise ValueError("Invalid output or safety token budget")
         if self.max_model_len <= self.max_output_tokens + self.prompt_safety_tokens:

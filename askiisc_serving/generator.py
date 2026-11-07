@@ -52,11 +52,45 @@ SYSTEM_NO_RETRIEVAL = (
     f"If you are not sure, reply exactly: \"{ABSTAIN}\""
 )
 MARKER_RE = re.compile(r"\[(S\d+)\]")
+MAX_MODEL_STREAM_BYTES = 2 * 1024 * 1024
 
 
 class GenerationUnavailable(Exception):
     pass
 
+
+async def _model_lines(response):
+    """Bound the entire upstream SSE body, including incomplete lines and reasoning."""
+    remaining = MAX_MODEL_STREAM_BYTES
+    pending = b""
+    async for block in response.aiter_bytes():
+        remaining -= len(block)
+        if remaining < 0:
+            raise GenerationUnavailable("Model stream exceeded the response size limit")
+        *lines, pending = (pending + block).split(b"\n")
+        for line in lines:
+            yield line.decode("utf-8")
+    if pending:
+        yield pending.decode("utf-8")
+
+
+def _usage_counters(value):
+    """Return only documented numeric counters from the provider's usage object."""
+    if not isinstance(value, dict):
+        return None
+
+    def counts(source, keys):
+        return {key: amount for key in keys if type(amount := source.get(key)) is int and amount >= 0}
+
+    usage = counts(value, ("prompt_tokens", "completion_tokens", "total_tokens"))
+    for key, counters in (
+        ("prompt_tokens_details", ("cached_tokens", "audio_tokens")),
+        ("completion_tokens_details", ("reasoning_tokens", "audio_tokens", "accepted_prediction_tokens",
+                                       "rejected_prediction_tokens")),
+    ):
+        if isinstance(details := value.get(key), dict):
+            usage[key] = counts(details, counters)
+    return usage or None
 
 def estimate_tokens(text: str) -> int:
     """Conservative estimate (over-counts for English): ~3.2 characters per token."""
@@ -215,7 +249,7 @@ class Generator:
                 if response.status_code != 200:
                     # Provider error bodies can echo prompts/keys or be arbitrarily large.
                     raise GenerationUnavailable(f"model endpoint HTTP {response.status_code}")
-                async for line in response.aiter_lines():
+                async for line in _model_lines(response):
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
@@ -225,7 +259,7 @@ class Generator:
                     if ev.get("error"):
                         raise GenerationUnavailable(f"Model stream error {ev['error'].get('code', 'unknown')}")
                     if ev.get("usage"):
-                        usage = ev["usage"]
+                        usage = _usage_counters(ev["usage"])
                     for ch in ev.get("choices") or []:
                         if ch.get("finish_reason") == "error":
                             raise GenerationUnavailable("Model stream ended with an error")
@@ -240,8 +274,8 @@ class Generator:
             raise
         except Exception as e:                       # connection refused, timeout, broken stream
             raise GenerationUnavailable(f"{type(e).__name__}: {self._redact(e)}") from e
-        if finish is None:
-            raise GenerationUnavailable("Model stream ended before a completion finish event")
+        if finish != "stop":
+            raise GenerationUnavailable("Model stream ended without a complete answer")
         yield "usage", {"usage": usage, "ttft_ms": None if ttft is None else round(ttft * 1000, 1),
                         "generation_ms": round((time.perf_counter() - t0) * 1000, 1), "finish_reason": finish}
 
@@ -298,7 +332,8 @@ def verify(answer: str, n_sources: int) -> dict:
         if m not in bucket:
             bucket.append(m)
     abstained = is_abstention(answer)
-    ok = abstained or (bool(used) and not unknown)
+    has_answer = any(char.isalnum() for char in MARKER_RE.sub("", answer))
+    ok = abstained or (bool(used) and not unknown and has_answer)
     return {"used": used, "unknown": unknown, "cited": bool(used), "abstained": abstained, "ok": ok}
 
 

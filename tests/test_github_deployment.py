@@ -10,6 +10,7 @@ import ci_bundle,ci_setup,ci,ci_host,release_lib
 def project(root):
     for package in ['askiisc_retrieval','askiisc_serving']:
         (root/package).mkdir(parents=True);(root/package/'__init__.py').write_text('# app\n')
+    (root/'askiisc_retrieval/graph_rules.py').write_text('GRAPH_RULES_VERSION = "test-rules"\n')
     (root/'config').mkdir();(root/'config/faculty_directory.json').write_text('{}')
     (root/'config/restricted_documents.json').write_text('{"documents":[]}')
     (root/'deploy/aws').mkdir(parents=True)
@@ -35,7 +36,8 @@ def test_host_rejects_code_paths_outside_allowlist(path):
 
 def test_compose_retains_frozen_private_assets_and_removes_old_code(tmp_path):
     base=project(tmp_path/'base');(base/'askiisc_serving/obsolete.py').write_text('old')
-    retained={'data/chunks.jsonl':'frozen-index','assets/model.safetensors':'frozen-model','.local/private/exam.pdf':'private-document'}
+    retained={'data/chunks.jsonl':'frozen-index','data/snapshot.json':'{"graph_version":"test-rules"}',
+              'assets/model.safetensors':'frozen-model','.local/private/exam.pdf':'private-document'}
     for name,body in retained.items():
         p=base/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(body)
     document={'original':'.local/private/exam.pdf','extracted':'.local/private/exam.pdf','sha256':release_lib.sha(base/'.local/private/exam.pdf'),'extracted_sha256':release_lib.sha(base/'.local/private/exam.pdf')}
@@ -53,6 +55,11 @@ def test_compose_retains_frozen_private_assets_and_removes_old_code(tmp_path):
     other=tmp_path/'bad-code';ci_bundle.package(source,other,'c'*40,'ci-other')
     with pytest.raises(ValueError,match='full, reviewed'):ci_bundle.compose(base,other,tmp_path/'bad-full')
     assert release_lib.verify_tree(base)['release_id']=='base'
+    (source/'askiisc_retrieval/graph_rules.py').write_text('GRAPH_RULES_VERSION = "new-rules"\n')
+    newer=tmp_path/'new-code';ci_bundle.package(source,newer,'d'*40,'ci-new-rules')
+    incompatible=tmp_path/'bad-graph'
+    with pytest.raises(ValueError,match='Rebuild'):ci_bundle.compose(base,newer,incompatible)
+    assert not incompatible.exists()
 
 
 def test_oidc_trust_pins_immutable_repository_ids_and_branch_refs():

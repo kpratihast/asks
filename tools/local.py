@@ -19,6 +19,7 @@ def configure():
         "ASKIISC_EMBED_MODEL": "BAAI/bge-small-en-v1.5", "ASKIISC_EMBED_DIM": "384",
         "ASKIISC_RERANKER": "none", "ASKIISC_RERANK_MIN": "none",
         "VLLM_URL": "http://127.0.0.1:8000", "SERVED_MODEL": "auto", "MODEL_PROVIDER_PREFERENCES": {},
+        "ASKIISC_TRUSTED_MODEL_URL": "",
         "CHAT_TEMPLATE_KWARGS": {},
         "AUTH_COOKIE_SECURE": "0",
         "EMAIL_AUTH_ENABLED": "1", "AUTH_PROFESSOR_TEST_EMAILS": "",

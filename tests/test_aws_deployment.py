@@ -38,6 +38,7 @@ def fake_project(tmp_path):
     root=tmp_path/'project';data=root/'data/current';root.mkdir();data.mkdir(parents=True)
     for package in ['askiisc_retrieval','askiisc_serving']:
         (root/package).mkdir();(root/package/'__init__.py').write_text('# source\n')
+    (root/'askiisc_retrieval/graph_rules.py').write_text('GRAPH_RULES_VERSION = "test-rules"\n')
     (root/'config').mkdir();(root/'config/faculty_directory.json').write_text('{"faculty":[]}')
     private=root/'.local/private';private.mkdir(parents=True)
     (private/'original.pdf').write_bytes(b'private source');(private/'reviewed.html').write_text('private extraction')
@@ -47,7 +48,8 @@ def fake_project(tmp_path):
     (root/'config/local.json').write_text(json.dumps({'private':'must not package'}))
     (root/'.local/secret.json').write_text('SMTP_SECRET_NEVER_PACKAGE')
     (data/'auth').mkdir();(data/'auth/sessions.sqlite3').write_bytes(b'LOGIN_SESSION_NEVER_PACKAGE')
-    (data/'snapshot.json').write_text(json.dumps({'embedding_model':release_lib.MODEL,'snapshot_id':'test-snapshot','active_version_ids':['v1']}))
+    (data/'snapshot.json').write_text(json.dumps({'embedding_model':release_lib.MODEL,'snapshot_id':'test-snapshot',
+                                                  'graph_version':'test-rules','active_version_ids':['v1']}))
     (data/'chunks.jsonl').write_text('{"access_scope":"student","source_url":"/v1/documents/test-document","version_id":"v1"}\n')
     (data/'graph.json').write_text('[]');(data/'qdrant/collection/askiisc_chunks').mkdir(parents=True)
     (data/'qdrant/meta.json').write_text('{}')
@@ -71,6 +73,18 @@ def test_package_is_self_contained_and_excludes_machine_credentials_sessions_and
     with pytest.raises(ValueError,match='checksum'):release_lib.verify_tree(target)
 
 
+def test_package_rejects_stale_graphs_and_source_symlinks(tmp_path):
+    root, data, model = fake_project(tmp_path)
+    graph = root/'askiisc_retrieval/graph_rules.py'
+    graph.write_text('GRAPH_RULES_VERSION = "new-rules"\n')
+    with pytest.raises(ValueError, match='Rebuild'):
+        awsctl.package(root, data, tmp_path/'output', model)
+    graph.write_text('GRAPH_RULES_VERSION = "test-rules"\n')
+    (root/'askiisc_serving/copied_key.py').symlink_to(root/'.local/secret.json')
+    with pytest.raises(ValueError, match='source links'):
+        awsctl.package(root, data, tmp_path/'output', model)
+
+
 @pytest.mark.parametrize('name,kind',[('../escape','file'),('/absolute','file'),('link','symlink'),('fifo','fifo')])
 def test_release_extraction_rejects_unsafe_members(tmp_path,name,kind):
     archive=tmp_path/'bad.tar.gz'
@@ -81,6 +95,15 @@ def test_release_extraction_rejects_unsafe_members(tmp_path,name,kind):
         else:m.size=1
         t.addfile(m,io.BytesIO(b'x') if kind=='file' else None)
     with pytest.raises(ValueError,match='Unsafe archive'):release_lib.unpack(archive,tmp_path/'tree')
+
+
+def test_release_rejects_duplicate_normalized_archive_paths(tmp_path):
+    archive = tmp_path/'duplicate.tar.gz'
+    with tarfile.open(archive, 'w:gz') as bundle:
+        bundle.addfile(tarfile.TarInfo('dir/file'))
+        bundle.addfile(tarfile.TarInfo('dir/./file'))
+    with pytest.raises(ValueError, match='Duplicate archive member'):
+        release_lib.unpack(archive, tmp_path/'tree')
 
 
 def test_cloud_runtime_uses_stable_auth_and_explicit_aws_paths(tmp_path):

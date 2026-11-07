@@ -115,6 +115,7 @@ def result_to_dict(result: RetrievalResult, include_text: bool = True) -> dict:
         "degraded_reason": result.degraded_reason,
         "citations": [asdict(c) for c in result.citations],
         "passages": [{"marker": p.marker, "chunk_id": p.chunk.chunk_id, "source_url": p.chunk.source_url,
+                      "version_id": p.chunk.version_id,
                       "section_heading": p.chunk.section_heading, "department": p.chunk.department,
                       "access_scope": p.chunk.access_scope, "via": p.via, "vector_score": round(p.score, 4),
                       "rerank_score": None if p.rerank_score is None else round(p.rerank_score, 4),

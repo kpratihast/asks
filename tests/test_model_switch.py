@@ -1,7 +1,9 @@
 """Lifecycle and process-ownership regression checks; no weights or GPU needed."""
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -47,6 +49,26 @@ def test_dry_run_is_non_mutating_and_preserves_precision(profile, precision, qua
 def test_model_flag_and_alias_work_without_positional_argument(capsys):
     model.main(['--model', '8b-q4', '--dry-run'])
     assert json.loads(capsys.readouterr().out)['profile'] == '8b-quantized'
+
+
+def test_cuda_launcher_defaults_to_loopback_and_requires_a_key_for_private_network_binding(tmp_path):
+    command = tmp_path / 'vllm'
+    command.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    command.chmod(0o755)
+    env = {**os.environ, 'PATH': str(tmp_path) + ':' + os.environ['PATH']}
+    env.pop('ASKIISC_VLLM_HOST', None)
+    env.pop('VLLM_API_KEY', None)
+    args = ['bash', str(PATH.parents[1] / 'deploy' / 'vllm_variants.sh'), '3b']
+
+    local = subprocess.run(args, env=env, text=True, capture_output=True, check=True).stdout.splitlines()
+    assert local[local.index('--host') + 1] == '127.0.0.1'
+    env['ASKIISC_VLLM_HOST'] = '10.0.0.5'
+    blocked = subprocess.run(args, env=env, text=True, capture_output=True)
+    assert blocked.returncode and 'VLLM_API_KEY' in blocked.stderr
+    private = subprocess.run(args, env={**env, 'VLLM_API_KEY': 'canary-key'}, text=True, capture_output=True, check=True)
+    flags = private.stdout.splitlines()
+    assert flags[flags.index('--host') + 1] == '10.0.0.5'
+    assert 'canary-key' not in private.stdout
 
 
 @pytest.mark.parametrize('args', [['8b', '--model', '3b'], ['invalid'], ['8b', '--memory-fraction', 'nan'],

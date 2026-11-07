@@ -127,6 +127,8 @@ class LocalRetrieval:
         except Exception as e:
             raise RetrievalUnavailable(f"{type(e).__name__}: {e}") from e
         d = result_to_dict(res)
+        if pinned and d["snapshot_id"] != pinned:
+            raise SnapshotMismatch("Snapshot changed during retrieval")
         return [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes], _trace(d, mode)
 
     def source(self, chunk_id: str, scopes: list[str]) -> dict | None:
@@ -155,7 +157,7 @@ class RemoteRetrieval:
         import os
         self.service_key = service_key or os.environ.get("RETRIEVAL_SERVICE_KEY")
         self.url = url.rstrip("/")
-        self.c = client or httpx.AsyncClient(timeout=timeout_s)
+        self.c = client or httpx.AsyncClient(timeout=timeout_s, trust_env=False)
 
     async def run(self, question, pinned, mode, programme, academic_year_, *, scopes):
         if mode not in MODES:
@@ -169,19 +171,27 @@ class RemoteRetrieval:
             r.raise_for_status()
         except Exception as e:
             raise RetrievalUnavailable(f"{type(e).__name__}: {e}") from e
-        d = r.json()
-        if any("access_scope" not in c for c in d.get("citations", [])):
-            raise RetrievalUnavailable("Remote retrieval must supply access_scope on every citation")
-        citations = {c['marker']: c for c in d.get('citations', [])}
-        for passage in d.get('passages', []):
-            citation = citations.get(passage.get('marker'))
-            if (citation is None or passage.get('access_scope') != citation['access_scope']
-                    or passage.get('chunk_id') not in citation.get('chunk_ids', [])
-                    or passage.get('department', '') != citation.get('department', '')):
-                raise RetrievalUnavailable('Remote passage provenance does not match its citation')
-        if pinned and d.get("snapshot_id") != pinned:
-            raise SnapshotMismatch(f"pinned snapshot {pinned} is not active (active: {d.get('snapshot_id')})")
-        return [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes], _trace(d, mode)
+        try:
+            d = r.json()
+            if pinned and d.get("snapshot_id") != pinned:
+                raise SnapshotMismatch("Remote snapshot changed")
+            citations = {c["marker"]: c for c in d["citations"]}
+            if len(citations) != len(d["citations"]):
+                raise RetrievalUnavailable("Remote citation markers are ambiguous")
+            if any("access_scope" not in c for c in citations.values()):
+                raise RetrievalUnavailable("Remote retrieval must supply access_scope on every citation")
+            for passage in d["passages"]:
+                citation = citations.get(passage.get("marker"))
+                if (citation is None or passage.get("access_scope") != citation["access_scope"]
+                        or passage.get("chunk_id") not in citation["chunk_ids"]
+                        or passage["source_url"] != citation["source_url"]
+                        or passage.get("version_id", citation["version_id"]) != citation["version_id"]
+                        or passage.get("department", "") != citation.get("department", "")):
+                    raise RetrievalUnavailable("Remote passage provenance does not match its citation")
+            hits = [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes]
+            return hits, _trace(d, mode)
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            raise RetrievalUnavailable("Remote retrieval returned malformed evidence") from exc
 
     def source(self, chunk_id, scopes):
         return None

@@ -7,12 +7,15 @@ import hashlib
 import json
 import math
 import os
+import posixpath
 import re
 import time
 import unicodedata
 from collections import OrderedDict
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+
+import anyio
 
 from starlette.responses import JSONResponse
 
@@ -88,8 +91,14 @@ class RequestGuard:
         host = headers.get(b'host','')
         if not re.fullmatch(r'(?:[a-zA-Z0-9.-]+|\[[0-9a-fA-F:]+\])(?::[0-9]{1,5})?', host):
             return await reject(400, 'Invalid host header')
+        try:
+            authority = urlsplit('http://' + host)
+            if authority.port == 0:
+                return await reject(400, 'Invalid host header')
+        except ValueError:
+            return await reject(400, 'Invalid host header')
         origin = os.environ.get('AUTH_PUBLIC_ORIGIN')
-        if origin and urlsplit('http://'+host).hostname not in {urlsplit(origin).hostname,'127.0.0.1','::1','localhost'}:
+        if origin and authority.hostname not in {urlsplit(origin).hostname,'127.0.0.1','::1','localhost'}:
             return await reject(400, 'Unrecognized host')
         # Reject ambiguous framing even on development/direct ASGI deployments.
         for name in [b'host', b'content-length', b'content-type', b'authorization', b'origin', b'transfer-encoding']:
@@ -166,7 +175,15 @@ class RequestGuard:
                     sent = True
                     return {'type':'http.request','body':bytes(body),'more_body':False}
                 return await receive()
-            return await self.app(scope, replay, secured_send)
+            try:
+                return await self.app(scope, replay, secured_send)
+            finally:
+                # The ASGI request owns the slot, including response-start failures and
+                # disconnects before a streaming iterator has been entered.
+                slot = scope.get('state', {}).pop('admission_slot', None)
+                if slot is not None:
+                    with anyio.CancelScope(shield=True):
+                        await slot.release()
         return await self.app(scope, receive, secured_send)
 
 
@@ -191,33 +208,51 @@ def instruction_attack(text: str) -> bool:
     return any(re.search(p,text,re.S) for p in patterns)
 
 
+def evidence_instruction_attack(hit: dict) -> bool:
+    fields = ('text', 'title', 'section', 'programme', 'department', 'instructor', 'excerpt', 'location')
+    values = [hit.get(field) for field in fields] + list(hit.get('graph_paths', []))
+    return any(instruction_attack(value) for value in values if isinstance(value, str))
+
+
 def audit_evidence(hits, trace, scopes, catalog=None):
     """Fail closed on missing classification; trace/proof data shares the same boundary."""
     allowed=[]
     for hit in hits:
         scope = hit.get('access_scope')
-        path = urlsplit(hit.get('url','')).path
+        if scope not in scopes:
+            continue
+        try:
+            url = urlsplit(hit.get('url', ''))
+            if url.scheme not in {'', 'http', 'https'} or (url.scheme and not url.hostname):
+                continue
+            # Browsers and proxies normalize dot segments and decode path escapes.
+            path = posixpath.normpath('/' + unquote(url.path, errors='strict').lstrip('/'))
+        except (TypeError, ValueError, UnicodeError):
+            continue
         doc = catalog.find(path.removeprefix('/v1/documents/')) if catalog and path.startswith('/v1/documents/') else None
         # A current manifest restriction also overrides stale/misclassified indexed copies.
         if path.startswith('/v1/documents/') and catalog and (doc is None or doc['access_scope'] != scope):
             continue
-        if scope in scopes:
-            allowed.append(hit)
+        allowed.append(hit)
     ids={cid for h in allowed for cid in h.get('chunk_ids',[])}
     proofs=[p for p in trace.get('graph_proofs',[]) if p.get('required_chunk_ids')
             and set(p['required_chunk_ids']) <= ids
             and all(step.get('access_scope') in scopes and set(step.get('chunk_ids',[])) <= ids
                     for step in p.get('steps',[]))]
+    proof_ids = {p.get('id') for p in proofs}
     safe=[]
     for hit in allowed:
         support=hit.get('graph_support',[])
-        if any(s.get('required_chunk_ids') and not set(s['required_chunk_ids'])<=ids for s in support):
+        if any(not set(s.get('required_chunk_ids', [])) <= ids
+               or (s.get('proof_id') and s['proof_id'] not in proof_ids) for s in support):
             hit={**hit,'graph_support':[],'graph_paths':[]}
         safe.append(hit)
     stripped = len(allowed)!=len(hits) or len(proofs)!=len(trace.get('graph_proofs',[]))
     trace={**trace,'graph_proofs':proofs}
     if stripped:
         trace['policy_trace']={}
+        if trace.get('connection_status') == 'complete' and not proofs:
+            trace.update(connection_status='missing_path', evidence_sufficient=False)
     # Backend errors can contain URLs, paths or credentials; never return raw diagnostics.
     if trace.get('degraded_reason'): trace['degraded_reason']='retrieval_component_unavailable'
     return safe,trace

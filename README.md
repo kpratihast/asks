@@ -62,6 +62,8 @@ AUTH_PROFESSOR_TEST_EMAILS=your-test-address@iisc.ac.in ./run-local.sh --auth on
 
 The default override is empty. The test address must still complete OTP verification. The verified faculty directory controls normal professor access. Addresses found in documents are answer evidence and have no effect on roles.
 
+Use a loopback model for restricted answers, or set `ASKIISC_TRUSTED_MODEL_URL` to the exact URL of a private model service you operate. The app returns authorized excerpts and document links when an untrusted model is selected. OpenRouter handles public evidence only.
+
 ## Compare the two retrieval modes
 
 Send the same question twice to `POST /v1/ask` with `"mode":"vector"` and `"mode":"full"`. Both modes use the same index and model. Vector RAG ranks passages by relevance. Graph RAG can also follow a source link or an indexed relationship to find a passage that ranks poorly on its own.

@@ -133,14 +133,31 @@ def test_multi_course_and_explicit_term_do_not_cross_join(tmp_path):
     store.close()
 
 
-def test_vector_does_not_receive_graph_proof_but_keeps_same_sources(tmp_path):
+def test_vector_keeps_sources_for_evaluation_but_cannot_claim_an_unverified_exam_join(tmp_path):
     r,store,_=make(tmp_path,[course(),exam()])
     result=r.retrieve('When is CS777 final exam?',SCOPES,use_graph=False)
-    assert result.connection_status is None and not result.graph_proofs
+    assert result.connection_status == 'unverified_path' and not result.graph_proofs
+    assert result.evidence_sufficient is False
     assert not any(p.graph_support.get('proof_id') for p in result.passages)
     assert any(p.chunk.chunk_id=='course-CS777' for p in result.passages)
     assert any(p.chunk.chunk_id=='exam-1' for p in result.passages)
+    by_instructor=r.retrieve('When is the final exam for the course taught by Ada North?',SCOPES,use_graph=False)
+    assert by_instructor.connection_status == 'unverified_path' and by_instructor.evidence_sufficient is False
     store.close()
+
+
+def test_vector_can_use_an_exam_record_that_names_the_course_directly(tmp_path):
+    direct = chunk('direct-exam', 'Course ID: CS777; Final examination date: 2026-12-01; Exam venue: Room 2',
+                   codes=['CS777'], scope='faculty')
+    r,store,_=make(tmp_path,[course(),exam(),direct])
+    try:
+        result=r.retrieve('When is CS777 final exam?',SCOPES,use_graph=False)
+        assert result.connection_status is None and result.evidence_sufficient is not False
+        assert [p.chunk.chunk_id for p in result.passages] == ['direct-exam']
+        missing=r.retrieve('When are CS777 and CS999 final exams?',SCOPES,use_graph=False)
+        assert missing.connection_status == 'unverified_path' and missing.evidence_sufficient is False
+    finally:
+        store.close()
 
 
 def test_graph_failure_abstains_for_connected_question_and_source_cap_cannot_drop_hop(tmp_path):

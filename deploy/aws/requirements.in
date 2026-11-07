@@ -9,7 +9,7 @@ httpx==0.28.1
 pyyaml>=6
 fastapi==0.141.1
 uvicorn==0.53.0
-pypdf==6.21.4
+pypdf==7.0.0
 # Keep embedding/tokenizer behavior aligned with the tested local snapshot.
 transformers==5.17.0
 huggingface-hub==1.31.0
