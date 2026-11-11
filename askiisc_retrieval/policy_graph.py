@@ -36,7 +36,7 @@ def cycle(value):
     return m.group(2)+('-JAN' if m.group(1).lower().startswith('jan') else '-AUG') if m else ''
 
 def category(value):
-    if re.search(r'\bSC\s*/\s*ST|\bPwD\b|\bscheduled (?:caste|tribe)',value,re.I):return 'SC/ST/PwD'
+    if re.search(r'\b(?:SC|ST|PwD)\b|\bscheduled (?:caste|tribe)',value,re.I):return 'SC/ST/PwD'
     if re.search(r'\bGN\b|\bgeneral.category|\bOBC\b|\bEWS\b',value,re.I):return 'GN/OBC/EWS'
     return ''
 
@@ -270,6 +270,16 @@ def retrieve_policy(query,graph,store,snapshot,scopes,*,departments=None,max_sta
             out.append(min(options,key=cost) if options else edge)
         return tuple(out)+(path[-1],)
     candidates=[(req,reanchor(path)) for req,path in candidates]
+    if not cat and ('FEES', '') in requirements and len(roots) == 1 and roots[0].startswith('Programme:'):
+        # Keep each published category when the question leaves it unspecified.
+        # Choosing a single fee row can make a category-specific amount appear universal.
+        fee_rows = [(('FEES', name), path) for req, path in candidates
+                    if req == ('FEES', '') and (name := dict(path[-1].qualifiers).get('category'))]
+        fee_requirements = {req for req, _ in fee_rows}
+        if len(fee_requirements) > 1:
+            requirements.remove(('FEES', ''))
+            requirements.update(fee_requirements)
+            candidates = [(req, path) for req, path in candidates if req != ('FEES', '')] + fee_rows
     # Greedy set coverage reduces redundant chunks while retaining one endpoint per requested facet.
     groups={}
     for req,path in candidates:

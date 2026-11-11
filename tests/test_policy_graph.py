@@ -52,11 +52,24 @@ def test_every_hop_validates_provenance(fault):
     assert not any(p.chunk.chunk_id=='grant' for p in ps)
     assert not proofs
 
-def test_fees_respect_category_and_no_other_department_reverse_traversal():
+@pytest.mark.parametrize('category', ['SC/ST/PwD', 'SC', 'ST'])
+def test_fees_respect_category_and_no_other_department_reverse_traversal(category):
     cs=fixture()+[c('reserved','Tuition Fee (Annual): 0 TOTAL: 2345','Fees — M.Tech. — SC/ST/PwD','IISc'),c('general','Tuition Fee (Annual): 7890 TOTAL: 9000','Fees — M.Tech. — GN/OBC/EWS','IISc'),c('other','The programme is completed in 88 months.','M.Tech.','OTHER')]
-    ps,_,_=run(cs,'For XYZ M.Tech., how long is the programme and what is the SC/ST/PwD annual fee?')
+    ps,_,_=run(cs,f'For XYZ M.Tech., how long is the programme and what is the {category} annual fee?')
     ids={p.chunk.chunk_id for p in ps}
     assert 'reserved' in ids and not ids&{'general','other'}
+
+def test_uncategorized_fees_keep_multiple_published_categories():
+    cs = [
+        c('reserved', 'Tuition Fee (Annual): 0 TOTAL: 2345', 'Fees — M.Tech. — SC/ST/PwD', 'IISc'),
+        c('general', 'Tuition Fee (Annual): 7890 TOTAL: 9000', 'Fees — M.Tech. — GN/OBC/EWS', 'IISc'),
+        c('research', 'Tuition Fee (Annual): 6789 TOTAL: 8899', 'Fees — M.Tech. (Res) — GN/OBC/EWS', 'IISc'),
+    ]
+    ps, proofs, trace = run(cs, 'What is the M.Tech. tuition fee?')
+    assert trace['status'] == 'complete'
+    assert {p.chunk.chunk_id for p in ps} == {'general', 'reserved'}
+    assert {proof['steps'][-1]['qualifiers']['category'] for proof in proofs} == {'SC/ST/PwD', 'GN/OBC/EWS'}
+
 
 def test_route_and_cycle_qualifications():
     cs=fixture()+[replace(c('route','Scholarship/fellowship per month: Rs. 9999','M.Tech.','IISc'),title='CFTI admissions'),c('old','Events: Interview dates; Date: November 3, 2030','January 2031','IISc'),c('new','Events: Interview dates; Date: November 8, 2031','January 2032','IISc')]

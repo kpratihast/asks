@@ -24,6 +24,7 @@ from . import config
 from .connections import vector_exam_evidence
 from .contract import ChunkPayload, Passage, RetrievalResult
 from .departments import DEFAULT, SHARED, course_department
+from .parse import course_codes
 from .query_analysis import QueryInfo, analyse, institute_admissions, term_key, requested_relations
 
 
@@ -130,7 +131,34 @@ class Retriever:
 
         initial_filters = {"doc_types": ["admissions", "policy"]} if shared_admissions else {}
         hits = search(self.candidates, **initial_filters)
+        named_urls = self._named_source_urls(query, hits) if departments else []
+        catalogue_leads = {}
+
+        def section_key(chunk):
+            return chunk.version_id, chunk.department, chunk.access_scope, chunk.section_heading
+
+        if named_urls:
+            # Shared front matter may name the document more clearly than its department sections.
+            # Search the same source within each authorized route before the top-k cut.
+            named_hits = search(self.candidates, source_urls=named_urls, **initial_filters)
+            hits = named_hits + hits
+            if not info.course_codes and "TAUGHT_BY" in requested_relations(query):
+                # The first chunk identifies the course. Continuations often start with
+                # a description or prerequisites, which do not make good catalogue entries.
+                for chunk, _ in named_hits:
+                    if chunk.doc_type == "catalogue" and course_codes(chunk.section_heading):
+                        key = section_key(chunk)
+                        catalogue_leads[key] = min(chunk.ordinal, catalogue_leads.get(key, chunk.ordinal))
         via = {c.chunk_id: "vector" for c, _ in hits}
+
+        def source_priority(chunk):
+            if chunk.source_url not in named_urls:
+                return 2, False, False
+            key = section_key(chunk)
+            front_matter = bool(catalogue_leads) and key not in catalogue_leads
+            continuation = chunk.ordinal > catalogue_leads.get(key, chunk.ordinal)
+            return (0 if chunk.department in departments else 1), front_matter, continuation
+
         if info.course_codes:
             for c, score in search(self.candidates, course_codes=info.course_codes):
                 if c.chunk_id not in via:
@@ -161,6 +189,8 @@ class Retriever:
         rerank = use_rerank and self.reranker is not None
         pool = self.rerank_pool if rerank else self.top_k
         ranked = self._rank(self._apply_term_logic(hits, info), info)
+        if named_urls:
+            ranked.sort(key=lambda item: source_priority(item[0]))
         link_anchors = [Passage(c, score, via[c.chunk_id]) for c, score in ranked if c.links or (c.doc_type == "schedule" and c.course_codes)]
         ranked = self._cover_departments(ranked, departments, lambda item: item[0].department)[:max(pool, self.top_k)]
         if rerank:                                      # people-pass chunks always reach the reranker, which
@@ -176,8 +206,11 @@ class Retriever:
         rerank_error = None
         if rerank:                                      # before the graph, so graph seeds come from the best passages
             rerank_error = self._rerank(query, passages)
-            passages = self._cover_departments(self._order(passages, info), departments,
-                                              lambda passage: passage.chunk.department)[:self.top_k]
+            passages = self._order(passages, info)
+            if named_urls:
+                passages.sort(key=lambda passage: source_priority(passage.chunk))
+            passages = self._cover_departments(passages, departments,
+                                               lambda passage: passage.chunk.department)[:self.top_k]
             t = lap("rerank", t)
 
         degraded, reason = False, None
@@ -190,6 +223,8 @@ class Retriever:
                     rerank_error = self._rerank(query, extra)   # graph additions compete on the same scale
                     t = lap("rerank_graph", t)
                 passages = self._order(passages + extra, info) if rerank else passages + extra
+                if named_urls:
+                    passages.sort(key=lambda passage: source_priority(passage.chunk))
             except FutTimeout:
                 degraded, reason = True, f"graph timeout after {self.graph_timeout_s}s"
             except Exception as e:                      # any graph failure -> vector-only (FR-9 fallback)
@@ -439,6 +474,23 @@ class Retriever:
         floor = min((p.score for p in passages), default=0.0)
         return [Passage(got[cid], floor, "graph", meta[2], graph_support=meta[3])
                 for cid, meta in wanted if cid in got]
+
+    @staticmethod
+    def _named_source_urls(query: str, hits: list[tuple[ChunkPayload, float]]) -> list[str]:
+        """Identify explicit references to a public source title among the authorized candidates."""
+        query_words = ' '.join(re.findall(r'[a-z0-9]+', query.lower()))
+        urls = {}
+        for chunk, _ in hits:
+            if chunk.access_scope != 'public' or chunk.source_url in urls:
+                continue
+            title = re.sub(r'\s+\([^()]+\)$', '', chunk.title)
+            words = re.findall(r'[a-z0-9]+', title.lower())
+            if len(words) >= 3 and re.search(r'\b(?:in|from|according to|per) (?:the )?'
+                                             + ' '.join(words) + r'\b', query_words):
+                urls[chunk.source_url] = len(words)
+        # The longer title wins when one document's name is the prefix of another.
+        longest = max(urls.values(), default=0)
+        return [url for url, length in urls.items() if length == longest][:3]
 
     def _document_passages(self, info, snap, scopes):
         if not hasattr(self.store, 'document_chunks'):

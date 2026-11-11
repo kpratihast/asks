@@ -30,7 +30,8 @@ from .admission import Admission, Rejected
 from .auth import KeyStore, Principal, Scope
 from .email_auth import EmailAuth, AuthConfig, AuthError, COOKIE
 from askiisc_retrieval.private_documents import DocumentCatalog
-from .generator import (ABSTAIN, GenerationUnavailable, Generator, citations_for, excerpt_fallback, verify, verify_connected)
+from .generator import (ABSTAIN, GenerationUnavailable, Generator, citations_for, excerpt_fallback,
+                        strip_abstention_boilerplate, verify, verify_connected)
 from .conversation import HELP_REPLY, guidance_reason, context_question, valid_rewrite
 from .metrics import Metrics
 from .retrieval_client import MODES, RetrievalUnavailable, SnapshotMismatch
@@ -479,6 +480,8 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish, tra
         return finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.", "answer": None,
                        "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
     attempts = 1
+    if q.mode != "none":
+        answer = strip_abstention_boilerplate(answer)
     check = _verify_answer(answer, selected, q.mode, trace)
     if not check["ok"] and q.mode != "none" and s.regenerate_on_bad_citations:
         retry = messages + [{"role": "assistant", "content": answer},
@@ -488,6 +491,7 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish, tra
                              f"exactly \"{ABSTAIN}\" if the evidence does not contain the answer."}]
         try:
             answer, meta2 = await gen.complete(retry)
+            answer = strip_abstention_boilerplate(answer)
             meta = _merge_meta(meta, meta2)
             attempts = 2
             check = _verify_answer(answer, selected, q.mode, trace)
@@ -557,6 +561,8 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
                                    "budget": budget, "replace_streamed_text": True}))
         return
     answer = "".join(parts).strip()
+    if q.mode != "none":
+        answer = strip_abstention_boilerplate(answer)
     check = _verify_answer(answer, selected, q.mode, trace)
     timings.update({k: meta.get(k) for k in ("ttft_ms", "generation_ms")})
     base = {"usage": meta.get("usage"), "budget": budget, "attempts": 1, "verification": check}

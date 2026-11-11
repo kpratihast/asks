@@ -47,7 +47,7 @@ bash: the same with `export NAME=value`.
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | bolt://127.0.0.1:7687 / neo4j / unset | graph. Password unset: vector-only retrieval |
 | `ASKIISC_RERANK_MODEL` | `BAAI/bge-reranker-base` | use `BAAI/bge-reranker-v2-m3` on the GPU |
 | `ASKIISC_DEVICE` | auto | `cuda` or `cpu` for the reranker |
-| `ASKIISC_RERANK_MIN` | `0.69` | abstention threshold (see section 4) |
+| `ASKIISC_RERANK_MIN` | `none` | optional cutoff calibrated for this corpus and reranker |
 | `ASKIISC_GRAPH_TTL_S` | `300` | how often the graph is re-read from Neo4j |
 
 Startup fails with a plain message if Qdrant or TEI cannot be reached. Postgres and Neo4j are optional:
@@ -146,13 +146,9 @@ prompt_context = format_context(res, 6000)
 
 ## 4. Known limitations (read before benchmarking)
 
-- **Abstention on vague questions.** `evidence_sufficient` uses the best reranker score. It is reliable for
-  factual questions, but it refuses some vague or list questions ("Is there a library?", "Which professor
-  fits my interest?") even when the right passages were retrieved, because the evidence is spread across
-  passages. On the stand-in test set: 12/15 retrieved, 7/15 above the threshold. Planned fix: let the
-  model judge sufficiency, with the reranker score as a backup. Until then, report abstention as measured.
-- **Threshold 0.69** was calibrated on the dev set with `bge-reranker-base` on the stand-in corpus.
-  Recalibrate (`eval` prints a suggestion) on the ingestion corpus and whenever the reranker model changes.
+- Reranking orders the evidence. The earlier CDS corpus used a cutoff of 0.69 with
+  `bge-reranker-base`. A cutoff is optional and defaults to `none`. Run `eval` on a dev set that
+  covers the indexed departments before setting a cutoff for your corpus and reranker.
 - **Fields the ingestion output does not provide yet are derived** (run `check-ingestion`): section
   headings from markdown, page type from the URL, course codes from text, everything `public`, no
   per-chunk semester. When ingestion adds the fields, they are used automatically; no code change.

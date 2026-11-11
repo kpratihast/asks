@@ -23,6 +23,12 @@ When a course page links to an instructor’s profile, ingestion saves the URL e
 
 A missing page, inactive version or unauthorized passage breaks the path. The retriever can still use the ordinary vector candidates. Joint offerings and unknown site layouts should be reviewed before ingesting a new department.
 
+If a question names a document and department, retrieval searches that source within the permitted departments before selecting the prompt passages. Catalogue entries prefer the chunk containing the course title over a continuation containing prerequisites. Fee evidence keeps the published programme, category and reporting period. The response can quote an annual figure when a semester breakdown is unavailable.
+
+A reranker score is specific to the model and indexed corpus. `ASKIISC_RERANK_MIN` defaults to `none`, which lets reranking order the passages while the model checks whether they answer the question. Set a numeric cutoff only after evaluating a separate dev set covering the enabled departments. Access, active-version and graph-proof checks apply independently of that cutoff.
+
+To diagnose a refusal, inspect the response's `reason`, `trace.evidence_sufficient`, `trace.rerank_top`, `trace.snapshot_id` and `budget`. A model abstention, a score cutoff and missing prompt evidence need different fixes. Confirm that the active index contains the configured pages before changing a cutoff.
+
 ## Work on ingestion
 
 - The default source list lives in `sources.yaml`. The quickstart enables CDS, CSA and ECE. `ASKIISC_SOURCE_DEPARTMENTS` filters the department pages and sections at build time.

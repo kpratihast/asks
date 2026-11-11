@@ -118,7 +118,7 @@ The corpus is chunked differently from the stand-in, so the scores move. Dev que
 
 ```powershell
 python -m askiisc_retrieval.cli eval --out dev_ingestion.csv
-# if the printed suggestion differs clearly from 0.69:
+# Set a cutoff only after calibrating it on this corpus and reranker.
 $env:ASKIISC_RERANK_MIN = "<suggested value>"
 ```
 

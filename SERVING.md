@@ -69,8 +69,8 @@ python -m askiisc_serving --host 0.0.0.0 --port 8100
 
 - The Llama models are gated on Hugging Face: accept the licence and set `HF_TOKEN` once to download,
   then run with `HF_HUB_OFFLINE=1` so nothing leaves the cloud at runtime (NFR-8).
-- With `bge-reranker-v2-m3` the abstention threshold must be recalibrated on the dev set
-  (`ASKIISC_RERANK_MIN`); 0.69 was calibrated for `bge-reranker-base`.
+- If you set `ASKIISC_RERANK_MIN`, calibrate it on the indexed departments with your selected
+  reranker. By default, reranking orders the evidence without applying a score cutoff.
 - Set `SERVING_TOKENIZER=meta-llama/Llama-3.2-3B-Instruct` to count prompt tokens exactly (default: a
   conservative estimate).
 

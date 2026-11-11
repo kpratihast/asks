@@ -50,12 +50,9 @@ RERANK_MODEL = os.environ.get("ASKIISC_RERANK_MODEL", "BAAI/bge-reranker-base")
 # ASKIISC_RERANK_POOL=6 / ASKIISC_RERANK_MAX_LEN=256 if it is too slow; keep the defaults for reported numbers.
 RERANK_POOL = int(os.environ.get("ASKIISC_RERANK_POOL", "10"))
 RERANK_MAX_LEN = int(os.environ.get("ASKIISC_RERANK_MAX_LEN", "384"))
-# Minimum best-reranker score to call the evidence sufficient. Calibrate with `eval` on the dev set
-# (it prints a suggestion) and set it here or via ASKIISC_RERANK_MIN. None = not calibrated yet.
-# First calibration 2026-10-06 (19 dev questions, listed pages only): 0.45.
-# Recalibrated 2026-10-08 on the crawl corpus (dev v14): must-abstain max 0.584, answered min 0.797 -> 0.69.
-# Recalibrate on the dev set whenever the corpus (e.g. the ingestion output) or the reranker changes.
-_RMIN = os.environ.get("ASKIISC_RERANK_MIN", "0.69")
+# Set a hard floor only after calibrating on the deployed corpus and reranker.
+# Without one, reranking changes the order and serving decides whether the evidence answers the question.
+_RMIN = os.environ.get("ASKIISC_RERANK_MIN", "none")
 RERANK_MIN = None if _RMIN.lower() == "none" else float(_RMIN)
 DEVICE = os.environ.get("ASKIISC_DEVICE")    # "cuda" / "cpu"; default: cuda if available
 

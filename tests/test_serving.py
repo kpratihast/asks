@@ -137,6 +137,38 @@ def test_model_abstention_is_reported_as_abstained():
     assert out["status"] == "abstained" and out["reason"] == "model_abstained" and out["citations"] == []
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("position", ["after", "same_paragraph"])
+def test_cited_answer_survives_refusal_boilerplate(stream, position):
+    partial = "The source lists the semester venue as CDS 202 [S1]. A room number for the tutorial is unavailable."
+    answer = {"after": partial + "\n\n" + ABSTAIN,
+              "same_paragraph": partial + " " + ABSTAIN}[position]
+    c, _ = make(FakeModel(answer))
+    with c:
+        response = ask(c, stream=stream)
+    out = json.loads(response.text.strip().split("\n\n")[-1].split("\n")[1][6:]) if stream else response.json()
+    assert out["status"] == "answered" and out["answer"] == partial
+    assert out["citations"][0]["used"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_primary_refusal_with_cited_background_remains_abstained(stream):
+    c, _ = make(FakeModel(ABSTAIN + "\n\nThe evidence discusses other course details [S1]."))
+    with c:
+        response = ask(c, stream=stream)
+    out = json.loads(response.text.strip().split("\n\n")[-1].split("\n")[1][6:]) if stream else response.json()
+    assert out["status"] == "abstained" and out["citations"] == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_refusal_with_only_a_marker_does_not_become_an_answer(stream):
+    c, _ = make(FakeModel(ABSTAIN + " [S1]"))
+    with c:
+        response = ask(c, stream=stream)
+    out = json.loads(response.text.strip().split("\n\n")[-1].split("\n")[1][6:]) if stream else response.json()
+    assert out["status"] != "answered"
+
+
 def test_bad_citations_regenerate_once_then_answer():
     model = FakeModel("Taught by Simmhan [S7].", "Taught by Yogesh Simmhan [S1].")
     c, _ = make(model)

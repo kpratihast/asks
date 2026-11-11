@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from askiisc_retrieval.query_analysis import analyse, requested_relations
 from askiisc_retrieval.parse import course_codes
+from askiisc_retrieval.policy_graph import category, requested_facets
 
 
 def evidence_bundle(question: str, hits: list[dict]) -> tuple[list[dict], set[str]]:
@@ -18,13 +19,18 @@ def evidence_bundle(question: str, hits: list[dict]) -> tuple[list[dict], set[st
     support must describe a requested relation; graph provenance alone is not a boost.
     """
     # Ordered graph proofs carry explicit dependencies across source documents.
-    dependencies = {cid for h in hits for support in h.get('graph_support', [])
-                    if support.get('proof_id') or support.get('policy_bundle_id') for cid in support.get('required_chunk_ids', [])}
-    # A single policy passage can improve ranking without crowding out other
-    # sources. Only a real multi-source dependency needs exclusive packing.
-    if len(dependencies) == 1 and not any(
-            support.get("proof_id") for hit in hits for support in hit.get("graph_support", [])):
-        return list(hits), set()
+    support = [proof for hit in hits for proof in hit.get("graph_support", [])]
+    dependencies = {cid for proof in support if proof.get("proof_id") or proof.get("policy_bundle_id")
+                    for cid in proof.get("required_chunk_ids", [])}
+    if len(dependencies) == 1 and not any(proof.get("proof_id") for proof in support):
+        # For a single category-specific policy fact, nearby rows for other
+        # categories or other charges can contradict the applicable row.
+        requested_category = category(question)
+        facets = set(requested_facets(question))
+        if not requested_category or not facets or not any(
+                proof.get("policy_bundle_id") and proof.get("policy_qualifiers", {}).get("category") == requested_category
+                and facets <= set(proof.get("policy_facets", [])) for proof in support):
+            return list(hits), set()
     if dependencies:
         core = [h for h in hits if dependencies.intersection(h.get('chunk_ids', []))]
         available = {cid for h in core for cid in h.get('chunk_ids', [])}

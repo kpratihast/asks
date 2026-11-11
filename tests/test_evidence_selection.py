@@ -106,3 +106,18 @@ def test_required_relationship_source_is_not_silently_truncated():
         'Which lab does Ada North lead?',[lab])
     assert not selected and not budget['truncated']
     assert budget['required_sources']==1 and budget['required_selected']==0
+
+
+def test_category_specific_fact_excludes_nearby_unqualified_passages():
+    fee = hit(1, "ST category", "Annual tuition is waived.")
+    fee["graph_support"] = [{
+        "policy_bundle_id": "fee",
+        "required_chunk_ids": fee["chunk_ids"],
+        "policy_qualifiers": {"category": "SC/ST/PwD"},
+        "policy_facets": ["FEES"],
+    }]
+    others = hit(2, "Application fees", "Application fee is 400.")
+    generator = Generator(Settings())
+    _, selected, budget = generator.prepare("Does IISc charge ST students tuition?", [fee, others])
+    assert [item["marker"] for item in selected] == ["S1"]
+    assert budget["required_sources"] == 1

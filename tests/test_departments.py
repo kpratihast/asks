@@ -5,13 +5,14 @@ import httpx
 import pytest
 
 from askiisc_retrieval import config, crawl, fetch
+from askiisc_retrieval.contract import ChunkPayload
 from askiisc_retrieval.admissions import normalize_html
 from askiisc_retrieval.departments import mentioned
 from askiisc_retrieval.ingest_stub import PageInput, build_index, load_page_inputs
 from askiisc_retrieval.private_documents import DocumentCatalog
 from askiisc_retrieval.query_analysis import analyse, institute_admissions
 from askiisc_retrieval.retriever import Retriever
-from askiisc_retrieval.snapshot import JsonSnapshotProvider, StaticSnapshotProvider
+from askiisc_retrieval.snapshot import JsonSnapshotProvider, Snapshot, StaticSnapshotProvider
 from askiisc_retrieval.stores import HashEmbedder, JsonGraphStore, QdrantStore
 from askiisc_serving.retrieval_client import LocalRetrieval
 
@@ -103,6 +104,56 @@ def test_department_selection_filters_shared_document_sections(mixed_retriever, 
     assert {p.chunk.department for p in result.passages} <= {code, 'IISc'}
     assert any(fact in p.chunk.text for p in result.passages if p.chunk.department == code)
     assert all(c.department in (code, 'IISc') for c in result.citations)
+
+
+@pytest.mark.parametrize("use_rerank", [False, True])
+def test_named_document_recovers_department_sections_below_general_hits(tmp_path, use_rerank):
+    class Embedder:
+        model_id = "test"
+
+        def embed_query(self, query):
+            return [1, 0]
+
+    class Reranker:
+        def score(self, query, texts):
+            return [0.1] * len(texts)
+
+    url = "https://example.test/guide"
+    title = "Guide to Graduate Studies (April 2026 edition)"
+
+    def section(cid, dept, heading, text, *, scope="public", source=url, name=title, ordinal=0):
+        return ChunkPayload(cid, source, source, source, name, heading, text, scope, "catalogue", dept,
+                            None, [], Embedder.model_id, ordinal)
+
+    chunks = [
+        section("preface", "IISc", "Preface", "Shared introductory material."),
+        section("unrelated", "ECE", "Overview", "Department overview.", source="https://example.test/overview",
+                name="Department Overview"),
+        section("department-preface", "ECE", "Programme requirements", "Overview and course requirements."),
+        section("courses", "ECE", "AB 101", "Course title and credits."),
+        section("continuation", "ECE", "AB 101", "Assignments and prerequisites.", ordinal=1),
+        section("other-department", "CSA", "Courses", "List of CSA courses and credits."),
+        section("private", "ECE", "Private", "Restricted notes.", scope="faculty"),
+    ]
+    store = QdrantStore("named-guide", 2, path=tmp_path / "q")
+    try:
+        store.upsert(chunks, [[1, 0], [1, 0], [0.99, 0.1], [0.6, 0.8], [0.8, 0.6], [1, 0], [1, 0]])
+        snapshot = Snapshot("s", Embedder.model_id, None, frozenset(c.version_id for c in chunks),
+                            ("IISc", "ECE", "CSA"))
+        retriever = Retriever(Embedder(), store, StaticSnapshotProvider(snapshot), top_k=1, candidates=3,
+                              reranker=Reranker(), rerank_pool=1, rerank_min=None)
+        query = "Which ECE courses are listed in the Guide to Graduate Studies?"
+        result = retriever.retrieve(query, ["public"], use_rerank=use_rerank)
+        assert [p.chunk.chunk_id for p in result.passages] == ["courses"]
+        assert result.evidence_sufficient is None
+        if use_rerank:
+            assert result.rerank_top == 0.1
+            retriever.rerank_min = 0.2
+            assert retriever.retrieve(query, ["public"]).evidence_sufficient is False
+        result = retriever.retrieve("Which ECE courses are offered?", ["public"], use_rerank=use_rerank)
+        assert [p.chunk.chunk_id for p in result.passages] == ["unrelated"]
+    finally:
+        store.close()
 
 
 def test_unqualified_programme_requests_clarification(mixed_retriever):
