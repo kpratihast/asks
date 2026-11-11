@@ -481,7 +481,7 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish, tra
                        "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
     attempts = 1
     if q.mode != "none":
-        answer = strip_abstention_boilerplate(answer)
+        answer = strip_abstention_boilerplate(answer, q.question, selected)
     check = _verify_answer(answer, selected, q.mode, trace)
     if not check["ok"] and q.mode != "none" and s.regenerate_on_bad_citations:
         retry = messages + [{"role": "assistant", "content": answer},
@@ -491,7 +491,7 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish, tra
                              f"exactly \"{ABSTAIN}\" if the evidence does not contain the answer."}]
         try:
             answer, meta2 = await gen.complete(retry)
-            answer = strip_abstention_boilerplate(answer)
+            answer = strip_abstention_boilerplate(answer, q.question, selected)
             meta = _merge_meta(meta, meta2)
             attempts = 2
             check = _verify_answer(answer, selected, q.mode, trace)
@@ -562,7 +562,7 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
         return
     answer = "".join(parts).strip()
     if q.mode != "none":
-        answer = strip_abstention_boilerplate(answer)
+        answer = strip_abstention_boilerplate(answer, q.question, selected)
     check = _verify_answer(answer, selected, q.mode, trace)
     timings.update({k: meta.get(k) for k in ("ttft_ms", "generation_ms")})
     base = {"usage": meta.get("usage"), "budget": budget, "attempts": 1, "verification": check}

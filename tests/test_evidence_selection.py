@@ -1,4 +1,5 @@
 """Behavioral regressions for complete relationship evidence and source-budget packing."""
+import pytest
 from askiisc_serving.evidence_selection import evidence_bundle
 from askiisc_serving.generator import Generator
 from askiisc_serving.settings import Settings
@@ -121,3 +122,21 @@ def test_category_specific_fact_excludes_nearby_unqualified_passages():
     _, selected, budget = generator.prepare("Does IISc charge ST students tuition?", [fee, others])
     assert [item["marker"] for item in selected] == ["S1"]
     assert budget["required_sources"] == 1
+
+
+@pytest.mark.parametrize("question,facet", [
+    ("What is the M.Tech. tuition fee per month?", "FEES"),
+    ("What is the weekly M.Tech. scholarship amount?", "FUNDING_AMOUNT"),
+])
+def test_single_policy_quantity_keeps_its_complete_endpoint(question, facet):
+    endpoint = hit(1, "Published amount", "Annual amount: 8347")
+    endpoint["graph_support"] = [{
+        "policy_bundle_id": "amount",
+        "required_chunk_ids": endpoint["chunk_ids"],
+        "policy_facets": [facet],
+        "policy_missing": [],
+    }]
+    unrelated = hit(2, "Other policy", "An unrelated quantity is 9999.")
+    _, selected, budget = Generator(Settings()).prepare(question, [endpoint, unrelated])
+    assert [item["marker"] for item in selected] == ["S1"]
+    assert budget["required_sources"] == budget["required_selected"] == 1

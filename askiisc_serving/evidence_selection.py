@@ -23,13 +23,16 @@ def evidence_bundle(question: str, hits: list[dict]) -> tuple[list[dict], set[st
     dependencies = {cid for proof in support if proof.get("proof_id") or proof.get("policy_bundle_id")
                     for cid in proof.get("required_chunk_ids", [])}
     if len(dependencies) == 1 and not any(proof.get("proof_id") for proof in support):
-        # For a single category-specific policy fact, nearby rows for other
-        # categories or other charges can contradict the applicable row.
+        # A proved amount or category-specific fact can stand alone. Nearby
+        # rows can mix other charges, periods or categories into the answer.
         requested_category = category(question)
         facets = set(requested_facets(question))
-        if not requested_category or not facets or not any(
-                proof.get("policy_bundle_id") and proof.get("policy_qualifiers", {}).get("category") == requested_category
-                and facets <= set(proof.get("policy_facets", [])) for proof in support):
+        if not facets or not any(
+                proof.get("policy_bundle_id") and not proof.get("policy_missing")
+                and facets <= set(proof.get("policy_facets", []))
+                and (proof.get("policy_qualifiers", {}).get("category") == requested_category
+                     if requested_category else facets <= {"FEES", "FUNDING_AMOUNT"})
+                for proof in support):
             return list(hits), set()
     if dependencies:
         core = [h for h in hits if dependencies.intersection(h.get('chunk_ids', []))]

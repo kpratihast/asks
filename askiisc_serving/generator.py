@@ -310,12 +310,33 @@ class Generator:
 
 
 # ---------------------------------------------------------------- answer checks
-def strip_abstention_boilerplate(answer: str) -> str:
-    """Remove a trailing refusal from a cited answer while preserving a primary refusal."""
+def strip_abstention_boilerplate(answer: str, question: str, selected: list[dict]) -> str:
+    """Keep genuine refusals and preserve a cited partial quantity backed by policy evidence."""
     stripped = answer.rstrip()
     if stripped.endswith(ABSTAIN):
         body = stripped[:-len(ABSTAIN)].rstrip()
         if ABSTAIN not in body and MARKER_RE.search(body):
+            return body
+    if ABSTAIN not in answer:
+        return answer
+    from askiisc_retrieval.policy_graph import requested_facets
+
+    requested = set(requested_facets(question))
+    if not requested or not requested <= {"FEES", "FUNDING_AMOUNT"}:
+        return answer
+    body = answer.replace(ABSTAIN, "").strip()
+    used = set(MARKER_RE.findall(body))
+    quantities = {value.replace(",", "") for value in re.findall(r"(?<!\w)\d[\d,]*(?:\.\d+)?", body)}
+    for hit in selected:
+        if hit["prompt_marker"] not in used:
+            continue
+        supported = any(proof.get("policy_bundle_id") and not proof.get("policy_missing")
+                        and requested <= set(proof.get("policy_facets", []))
+                        for proof in hit.get("graph_support", []))
+        # Labelled policy fields establish support for a published quantity.
+        values = {value.replace(",", "") for value in re.findall(
+            r":\s*(?:₹\s*|Rs\.?\s*|INR\s*)?(\d[\d,]*(?:\.\d+)?)", hit["text"])}
+        if supported and quantities & values:
             return body
     return answer
 

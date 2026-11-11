@@ -29,6 +29,8 @@ A reranker score is specific to the model and indexed corpus. `ASKIISC_RERANK_MI
 
 To diagnose a refusal, inspect the response's `reason`, `trace.evidence_sufficient`, `trace.rerank_top`, `trace.snapshot_id` and `budget`. A model abstention, a score cutoff and missing prompt evidence need different fixes. Confirm that the active index contains the configured pages before changing a cutoff.
 
+A partial numeric reply can survive a model's refusal sentence when its cited amount matches a labelled field in policy evidence covering the requested fee or scholarship metric. Refusal explanations with incidental citations retain their refusal status.
+
 ## Work on ingestion
 
 - The default source list lives in `sources.yaml`. The quickstart enables CDS, CSA and ECE. `ASKIISC_SOURCE_DEPARTMENTS` filters the department pages and sections at build time.

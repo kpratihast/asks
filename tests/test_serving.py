@@ -11,7 +11,7 @@ from askiisc_serving.admission import Admission, Rejected
 from askiisc_serving.app import create_app
 from askiisc_serving.conversation import HELP_REPLY
 from askiisc_serving.auth import KeyStore
-from askiisc_serving.generator import ABSTAIN, SYSTEM, Generator, verify
+from askiisc_serving.generator import ABSTAIN, SYSTEM, Generator, strip_abstention_boilerplate, verify
 from askiisc_serving.retrieval_client import SnapshotMismatch, academic_year, hits_from_result
 from askiisc_serving.settings import Settings
 
@@ -352,3 +352,23 @@ def test_retry_merges_nested_mlx_usage_details():
     assert m['usage']['completion_tokens_details']=={'reasoning_tokens':0}
     assert m['generation_ms']==250 and m['ttft_ms']==20
     assert _merge_meta({'usage':None},{'usage':None})['usage'] is None
+
+
+@pytest.mark.parametrize("fault", [None, "amount", "facet", "missing", "unproved", "marker"])
+def test_partial_quantity_requires_the_requested_metric_and_cited_source_value(fault):
+    question = "What is the monthly tuition fee for M.Tech.?"
+    support = {"policy_bundle_id": "fees", "policy_facets": ["FEES"], "policy_missing": []}
+    hit = {**HIT, "prompt_marker": "S1", "text": "Tuition Fee (Annual): 8,234",
+           "graph_support": [support]}
+    amount = "9,876" if fault == "amount" else "8,234"
+    marker = "S7" if fault == "marker" else "S1"
+    if fault == "facet":
+        question = "How long is the degree and what is its tuition fee?"
+    if fault == "missing":
+        support["policy_missing"] = ["FEES"]
+    if fault == "unproved":
+        hit["graph_support"] = []
+    body = f"The published annual tuition is ₹{amount} [{marker}]. A monthly breakdown is unavailable."
+    answer = ABSTAIN + "\n\n" + body
+    cleaned = strip_abstention_boilerplate(answer, question, [hit])
+    assert cleaned == (body if fault is None else answer)
