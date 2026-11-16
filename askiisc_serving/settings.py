@@ -62,6 +62,10 @@ class Settings:
     regenerate_on_bad_citations: bool = field(default_factory=lambda: os.environ.get("REGENERATE", "1") == "1")
 
     # Optional public-document chat; disabled unless explicitly enabled by the local launcher.
+    # FR-8 fallbacks when the model server cannot report them (labelled "config" in responses).
+    model_checkpoint: str = field(default_factory=lambda: os.environ.get("MODEL_CHECKPOINT", ""))
+    model_precision: str = field(default_factory=lambda: os.environ.get("MODEL_PRECISION", ""))
+    model_revision: str = field(default_factory=lambda: os.environ.get("MODEL_REVISION", ""))
     public_chat: bool = field(default_factory=lambda: os.environ.get("PUBLIC_CHAT", "0") == "1")
 
     # Off = public-only mode, with email sessions and privileged API keys ignored.

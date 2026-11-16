@@ -233,6 +233,9 @@ class Retriever:
                 log.warning("degraded retrieval: %s", reason)
                 t = lap("graph", t)
 
+        if use_graph and getattr(self.graph, "unavailable", None):
+            degraded, reason = True, f"graph unavailable: {self.graph.unavailable}"
+
         proof_passages, graph_proofs, connection_status = [], [], None
         if use_graph:
             from .connections import plan_for, resolve_connections

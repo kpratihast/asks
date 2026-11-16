@@ -140,7 +140,7 @@ def test_model_abstention_is_reported_as_abstained():
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("position", ["after", "same_paragraph"])
 def test_cited_answer_survives_refusal_boilerplate(stream, position):
-    partial = "The source lists the semester venue as CDS 202 [S1]. A room number for the tutorial is unavailable."
+    partial = "The source lists Yogesh Simmhan as the instructor [S1]. A room number for the tutorial is unavailable."
     answer = {"after": partial + "\n\n" + ABSTAIN,
               "same_paragraph": partial + " " + ABSTAIN}[position]
     c, _ = make(FakeModel(answer))

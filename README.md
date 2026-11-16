@@ -1,6 +1,6 @@
 # Ask IISc
 
-Ask questions about IISc courses, admissions and academic policies. Answers cite the indexed pages. Public chat can run without sign-in. Student and faculty documents require the configured role.
+Ask questions about IISc courses, admissions and academic policies. Answers cite the indexed pages, and every cited claim is checked against its source. Every request needs a credential: a guest key, an IISc email sign-in, or a student/faculty key. Student and faculty documents require the configured role.
 
 ## Install and run
 
@@ -29,6 +29,12 @@ export ASKIISC_PRIVATE_MANIFEST="$PWD/.local/public-documents.json"
 ```
 
 Replace `askiisc` with the model ID your server reports. Open <http://127.0.0.1:8100>. If the model is unavailable, the app can return matching source excerpts.
+
+**Access (FR-6).** With sign-in off, the launcher creates a private guest key in `.local/serving_keys.yaml` (git-ignored, mode 600) and prints its path. Paste the key into the chat page's **API access** box, or send `Authorization: Bearer <key>`. Requests without a valid key get HTTP 401. To use your own keys, set `SERVING_KEYS_FILE` (see [serving_keys.example.yaml](serving_keys.example.yaml)). `PUBLIC_CHAT=1` allows anonymous guests for a demo only; it is off by default and logs a warning.
+
+**Answer checks (FR-11).** The launcher runs the cross-encoder reranker with the 0.69 abstention gate on, as in the evaluated configuration. After generation, every number and specific name or term in a cited claim must appear in the passage it cites; unsupported claims are removed, a reply that says the sources lack the answer is returned as a refusal, and a reply that both answers and says it found nothing returns source excerpts instead. Questions that ask the assistant to use its general knowledge or not to cite sources are refused before the model is called.
+
+**Metadata and degraded mode.** Every response's `trace.model_info` records the served checkpoint, precision (for example `bf16`, `awq-4bit`, or Ollama's `Q4_K_M`), digest when available, and the model id the server reported for that answer (FR-8). If `graph.json` is missing or unreadable, the app starts vector-only and marks graph-mode answers `degraded` with the reason; `/readyz` reports it (FR-9). `ASKIISC_GRAPH_TIMEOUT_S` sets the graph time limit (default 0.5 s).
 
 General admissions and fee questions use IISc sources. Name a department when asking about its requirements, faculty or labs.
 

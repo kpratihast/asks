@@ -110,6 +110,10 @@ class LocalRetrieval:
     def snapshot_id(self) -> str:
         return self.r.snapshots.active().snapshot_id
 
+    def graph_status(self) -> dict:
+        reason = getattr(getattr(self.r, "graph", None), "unavailable", None)
+        return {"available": reason is None, "reason": reason}
+
     async def run(self, question, pinned, mode, programme, academic_year_, *, scopes):
         from askiisc_retrieval.citations import result_to_dict
         if mode not in MODES:

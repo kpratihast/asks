@@ -14,6 +14,7 @@ Request path for /v1/ask:
 from __future__ import annotations
 
 import json
+import logging
 import asyncio
 import os
 import time
@@ -28,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from .admission import Admission, Rejected
 from .auth import KeyStore, Principal, Scope
+from .grounding import ground
 from .email_auth import EmailAuth, AuthConfig, AuthError, COOKIE
 from askiisc_retrieval.private_documents import DocumentCatalog
 from .generator import (ABSTAIN, GenerationUnavailable, Generator, citations_for, excerpt_fallback,
@@ -36,7 +38,7 @@ from .conversation import HELP_REPLY, guidance_reason, context_question, valid_r
 from .metrics import Metrics
 from .retrieval_client import MODES, RetrievalUnavailable, SnapshotMismatch
 from .settings import Settings
-from .security import RequestGuard, instruction_attack, evidence_instruction_attack, audit_evidence
+from .security import RequestGuard, instruction_attack, evidence_instruction_attack, audit_evidence, knowledge_override
 
 
 class OTPRequest(BaseModel):
@@ -97,12 +99,18 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     async def lifespan(app: FastAPI):
         st = app.state
         if st.keys is None:
-            if not s.email_auth_enabled or (s.public_chat and not s.keys_file):
-                st.keys = KeyStore({})
-            elif not s.keys_file or not s.keys_file.exists():
-                raise RuntimeError("SERVING_KEYS_FILE must point to a key file (see serving_keys.example.yaml)")
-            else:
+            if s.keys_file and s.keys_file.exists():
                 st.keys = KeyStore.from_file(s.keys_file)
+            elif s.keys_file:
+                raise RuntimeError(f"SERVING_KEYS_FILE {s.keys_file} does not exist (see serving_keys.example.yaml)")
+            elif s.public_chat or s.email_auth_enabled:
+                st.keys = KeyStore({})          # email sessions and/or explicit anonymous chat only
+            else:
+                raise RuntimeError("No way to authenticate: set SERVING_KEYS_FILE (guest/student/faculty keys), "
+                                   "enable email sign-in, or explicitly allow anonymous chat with PUBLIC_CHAT=1")
+            if s.public_chat:
+                logging.getLogger("askiisc.serving").warning("PUBLIC_CHAT=1: requests without credentials are served as anonymous guests "
+                            "(demo only; FR-6 deployments use guest keys)")
         if st.retrieval is None:
             if s.retrieval == "remote":
                 from .retrieval_client import RemoteRetrieval
@@ -116,7 +124,12 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             st.generator = Generator(s)
         if s.served_model == "auto":
             await st.generator.discover()
-        import logging
+        identify = getattr(st.generator, "identify", None)
+        if identify is not None:
+            try:
+                await identify()
+            except Exception:                    # identity is metadata; never block startup on it
+                pass
         logging.getLogger("askiisc.serving").warning(
             "Ready: model %s at %s | tenants %s | try http://<host>:<port>/docs",
             s.served_model, s.vllm_url, sorted(st.keys.tenants))
@@ -149,19 +162,21 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         return _error(422, 'Invalid request. Check the field types and length limits.')
 
     async def principal(authorization, request):
-        if not s.email_auth_enabled:
-            # Disabling identity never exposes restricted sources or accepts privileged keys.
-            return Principal("public-browser", "public", "guest")
-        if not authorization:
+        """FR-6: a presented credential must be valid in every mode; an absent one is accepted only
+        for a verified email session, or when anonymous public chat was explicitly enabled."""
+        if authorization:
+            p = app.state.keys.lookup(authorization)
+            if p is None:
+                app.state.metrics.reject(401, "unauthenticated")
+            return p
+        if s.email_auth_enabled:
             session = await asyncio.to_thread(app.state.email_auth.lookup, request.cookies.get(COOKIE))
             if session is not None:
                 return session
-        if s.public_chat and not authorization:
+        if s.public_chat:
             return Principal("public-browser", "public", "guest")
-        p = app.state.keys.lookup(authorization)
-        if p is None:
-            app.state.metrics.reject(401, "unauthenticated")
-        return p
+        app.state.metrics.reject(401, "unauthenticated")
+        return None
 
     @app.get("/", include_in_schema=False)
     async def home():
@@ -169,7 +184,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
 
     @app.get("/ui-config", include_in_schema=False)
     async def ui_config():
-        return {"public_chat": s.public_chat or not s.email_auth_enabled, "model": s.served_model,
+        return {"public_chat": s.public_chat, "model": s.served_model,
                 "max_question_chars": s.max_question_chars,
                 "email_login": s.email_auth_enabled,
                 "email_delivery_ready": bool(app.state.email_auth and app.state.email_auth.available)}
@@ -238,6 +253,8 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     @app.get("/v1/documents/{document_id}")
     async def document(document_id: str, request: Request, authorization: str | None = Header(default=None)):
         p = await principal(authorization, request)
+        if authorization and p is None:
+            return _error(401, "missing or invalid API key")
         doc = app.state.documents.find(document_id)
         if doc is None:
             raise HTTPException(404, "No such document")
@@ -285,7 +302,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         rec = {"tenant": p.tenant, "role": p.role, "mode": q.mode, "stream": q.stream, "model": s.served_model}
 
         untrusted = '\n'.join([q.question, previous_question or '', q.programme or ''])
-        route_reason = ('unsafe_instruction' if instruction_attack(untrusted) else
+        route_reason = ('unsafe_instruction' if instruction_attack(untrusted) or knowledge_override(untrusted) else
                         guidance_reason(q.question)) if q.mode != "none" else None
         if route_reason:
             payload = {"status": "guidance", "reason": route_reason, "answer": HELP_REPLY,
@@ -349,8 +366,11 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                 # Unrelated or unanswered questions must not display a pile of incidental matches.
                 payload.pop("sources_that_may_help", None)
             timings["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            served_by = payload.pop("served_by", None)
+            identity = dict(getattr(app.state.generator, "identity", {}) or {})
             payload.update({"trace": {**trace, "timings_ms": {**trace.get("timings_ms", {}), **timings},
-                                      "model": s.served_model}})
+                                      "model": s.served_model,
+                                      "model_info": {**identity, "responded_as": served_by}}})
             app.state.metrics.record({**rec, "status": payload["status"], "reason": payload.get("reason"),
                                       "snapshot": trace.get("snapshot_id"), "degraded": trace.get("degraded"),
                                       "timings_ms": timings, "usage": payload.get("usage"),
@@ -435,6 +455,10 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         r_ok, g_ok = ready_cache['retrieval'], ready_cache['model']
         body = {"retrieval": r_ok, "model_endpoint": g_ok, "model": s.served_model,
                 "admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared"}
+        body["model_info"] = getattr(app.state.generator, "identity", None)
+        graph_status = getattr(app.state.retrieval, "graph_status", None)
+        if graph_status is not None:
+            body["graph"] = graph_status()           # degraded (vector-only) but still ready
         return JSONResponse(body, status_code=200 if (r_ok and g_ok) else 503)
 
     @app.get("/metrics")
@@ -470,6 +494,22 @@ def _verify_answer(answer, selected, mode, trace):
     return check
 
 
+def _grounded_check(answer, selected, mode, trace, question=""):
+    """Claim support first (it may turn the answer into a refusal), then the marker checks."""
+    info = {}
+    if mode != "none":
+        answer, info = ground(answer, selected, ABSTAIN, question)
+    check = _verify_answer(answer, selected, mode, trace)
+    check.update(info)
+    if info.get("self_contradiction"):
+        check["ok"] = False
+    return answer, check
+
+
+def _failure_reason(check):
+    return "self_contradiction" if check.get("self_contradiction") else "citation_check_failed"
+
+
 # ---------------------------------------------------------------------- answering
 async def _answer(app, q, messages, selected, budget, hits, timings, finish, trace) -> dict:
     s = app.state.settings
@@ -482,7 +522,7 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish, tra
     attempts = 1
     if q.mode != "none":
         answer = strip_abstention_boilerplate(answer, q.question, selected)
-    check = _verify_answer(answer, selected, q.mode, trace)
+    answer, check = _grounded_check(answer, selected, q.mode, trace, q.question)
     if not check["ok"] and q.mode != "none" and s.regenerate_on_bad_citations:
         retry = messages + [{"role": "assistant", "content": answer},
                             {"role": "user", "content": "Your answer did not cite the evidence correctly. Answer "
@@ -494,21 +534,22 @@ async def _answer(app, q, messages, selected, budget, hits, timings, finish, tra
             answer = strip_abstention_boilerplate(answer, q.question, selected)
             meta = _merge_meta(meta, meta2)
             attempts = 2
-            check = _verify_answer(answer, selected, q.mode, trace)
+            answer, check = _grounded_check(answer, selected, q.mode, trace, q.question)
         except GenerationUnavailable as e:
             return finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.",
                            "answer": None, "excerpts": excerpt_fallback(hits), "citations": [], "budget": budget})
     timings.update({k: meta.get(k) for k in ("ttft_ms", "generation_ms")})
-    base = {"usage": meta.get("usage"), "budget": budget, "attempts": attempts, "verification": check}
+    base = {"usage": meta.get("usage"), "budget": budget, "attempts": attempts, "verification": check,
+            "served_by": meta.get("served_by")}
     if q.mode == "none":                                   # baseline B0: nothing to cite against
         status = "abstained" if check["abstained"] else "answered"
         return finish({"status": status, "reason": "no_retrieval_baseline", "answer": answer, "citations": [],
                        "grounded": False, **base})
     if check["abstained"]:
-        return finish({"status": "abstained", "reason": "model_abstained", "answer": ABSTAIN, "citations": [],
-                       "sources_that_may_help": excerpt_fallback(hits), **base})
+        return finish({"status": "abstained", "reason": check.get("refusal_reason", "model_abstained"), "answer": ABSTAIN,
+                       "citations": [], "sources_that_may_help": excerpt_fallback(hits), **base})
     if not check["ok"]:
-        return finish({"status": "fallback", "reason": "citation_check_failed", "answer": None,
+        return finish({"status": "fallback", "reason": _failure_reason(check), "answer": None,
                        "excerpts": excerpt_fallback(hits), "citations": [], **base})
     return finish({"status": "answered", "answer": answer, "citations": citations_for(selected, check["used"]),
                    "grounded": True, **base})
@@ -563,17 +604,18 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
     answer = "".join(parts).strip()
     if q.mode != "none":
         answer = strip_abstention_boilerplate(answer, q.question, selected)
-    check = _verify_answer(answer, selected, q.mode, trace)
+    answer, check = _grounded_check(answer, selected, q.mode, trace, q.question)
     timings.update({k: meta.get(k) for k in ("ttft_ms", "generation_ms")})
-    base = {"usage": meta.get("usage"), "budget": budget, "attempts": 1, "verification": check}
+    base = {"usage": meta.get("usage"), "budget": budget, "attempts": 1, "verification": check,
+            "served_by": meta.get("served_by")}
     if q.mode == "none":
         payload = {"status": "abstained" if check["abstained"] else "answered", "reason": "no_retrieval_baseline",
                    "answer": answer, "citations": [], "grounded": False, **base}
     elif check["abstained"]:
-        payload = {"status": "abstained", "reason": "model_abstained", "answer": ABSTAIN, "citations": [],
-                   "sources_that_may_help": excerpt_fallback(hits), **base}
+        payload = {"status": "abstained", "reason": check.get("refusal_reason", "model_abstained"), "answer": ABSTAIN,
+                   "citations": [], "sources_that_may_help": excerpt_fallback(hits), **base}
     elif not check["ok"]:
-        payload = {"status": "fallback", "reason": "citation_check_failed", "answer": None,
+        payload = {"status": "fallback", "reason": _failure_reason(check), "answer": None,
                    "excerpts": excerpt_fallback(hits), "citations": [], "replace_streamed_text": True, **base}
     else:
         payload = {"status": "answered", "answer": answer, "citations": citations_for(selected, check["used"]),

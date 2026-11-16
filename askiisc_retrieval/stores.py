@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import uuid
@@ -301,10 +302,27 @@ class JsonGraphStore:
     def save(self, path: Path):
         path.write_text(json.dumps([asdict(e) for e in self.edges], indent=1), encoding="utf-8")
 
+    unavailable: str | None = None      # why the graph could not be loaded; retrieval reports it as degraded
+
     @classmethod
     def load(cls, path: Path) -> "JsonGraphStore":
-        raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-        return cls([Edge(**{**e, "chunk_ids": tuple(e["chunk_ids"]), "qualifiers": tuple(tuple(q) for q in e.get("qualifiers", ()))}) for e in raw])
+        """A missing or unreadable graph file must not stop the service or be silently empty (FR-9):
+        the store loads empty, records why, and retrieval runs vector-only with degraded=True."""
+        if not path.exists():
+            store = cls([])
+            store.unavailable = f"{path.name} missing"
+            logging.getLogger("askiisc.retrieval").error("graph unavailable: %s not found; serving vector-only", path)
+            return store
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return cls([Edge(**{**e, "chunk_ids": tuple(e["chunk_ids"]),
+                                "qualifiers": tuple(tuple(q) for q in e.get("qualifiers", ()))}) for e in raw])
+        except (OSError, UnicodeDecodeError, ValueError, TypeError, KeyError) as exc:
+            store = cls([])
+            store.unavailable = f"{path.name} unreadable ({type(exc).__name__})"
+            logging.getLogger("askiisc.retrieval").error("graph unavailable: %s unreadable (%s); serving vector-only",
+                                                        path, exc)
+            return store
 
     def _check(self):
         if self.fail:

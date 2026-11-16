@@ -36,8 +36,9 @@ class RequestGuard:
         self.buckets = OrderedDict()
         self.global_buckets = {}
         self.readers = 0
-        html = (Path(__file__).parent / 'static/index.html').read_text()
-        hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() + "'"
+        # Hash the exact bytes FileResponse serves (UTF-8, no newline translation) on every OS.
+        html = (Path(__file__).parent / 'static/index.html').read_bytes().decode('utf-8')
+        hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode('utf-8')).digest()).decode() + "'"
                   for s in re.findall(r'<script>(.*?)</script>', html, re.S)]
         self.headers = {
             'content-security-policy': "default-src 'none'; script-src " + ' '.join(hashes) +
@@ -207,6 +208,25 @@ def instruction_attack(text: str) -> bool:
     ]
     return any(re.search(p,text,re.S) for p in patterns)
 
+
+
+def knowledge_override(text: str) -> bool:
+    """Questions that ask the assistant to answer outside the sources ("use your general knowledge",
+    "instead of the documents", "do not cite sources"). Checked on user input only: such phrases can occur
+    legitimately in indexed policy text (e.g. plagiarism rules), so evidence is not screened with them."""
+    text=unicodedata.normalize('NFKC',text)
+    text=''.join(c for c in text if unicodedata.category(c)!='Cf').casefold()
+    patterns=[
+        r"\b(?:use|using|rely(?:ing)?\s+on|from|with|based\s+on|draw(?:ing)?\s+on)\s+(?:only\s+)?(?:your\s+)?(?:own\s+)?"
+        r"(?:general|prior|background|world|common|internal|pre-?trained|training|outside|external)\s+(?:knowledge|information|data)\b",
+        r"\b(?:from|using|use|with|on|rely\s+on)\s+your\s+(?:own\s+)?(?:knowledge|understanding|memory|training)\b",
+        r"\b(?:answer|reply|respond)\s+from\s+memory\b",
+        r"\b(?:instead\s+of|rather\s+than|without|ignoring|not\s+from|outside(?:\s+of)?)\s+(?:using\s+|looking\s+at\s+|reading\s+)?"
+        r"(?:the\s+|your\s+|these\s+|any\s+)?(?:provided\s+|retrieved\s+|given\s+)?(?:documents?|sources?|context|evidence|passages?|corpus)\b",
+        r"\b(?:do\s+not|don['’]?t|never|without|no\s+need\s+to)\s+(?:cite|citing|use|using|include|including|give|giving|add|adding)\s+"
+        r"(?:any\s+)?(?:the\s+)?(?:sources?|citations?|references?|markers?)\b",
+    ]
+    return any(re.search(p,text) for p in patterns)
 
 def evidence_instruction_attack(hit: dict) -> bool:
     fields = ('text', 'title', 'section', 'programme', 'department', 'instructor', 'excerpt', 'location')
