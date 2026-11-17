@@ -109,7 +109,7 @@ Streaming does not regenerate; the JSON path regenerates once when citations are
 
 ### Others
 `GET /v1/sources/{chunk_id}` (full cited text, only if active and within the key's scope),
-`GET /healthz`, `GET /readyz` (retrieval + model endpoint), `GET /metrics` (Prometheus text).
+`GET /healthz`, `GET /readyz` (retrieval + model endpoint; admission and model details for authorized operators only), `GET /metrics` (Prometheus text, same authorization).
 
 ## 4. Settings (environment variables)
 

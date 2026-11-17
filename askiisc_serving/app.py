@@ -3,7 +3,7 @@
 POST /v1/ask             question -> grounded, cited answer (JSON), or a token stream (SSE) with "stream": true
 GET  /v1/sources/{id}    full text + metadata of one cited chunk (citation resolution, FR-12)
 GET  /healthz            process is up
-GET  /readyz             retrieval and the model endpoint answer
+GET  /readyz             retrieval and the model endpoint answer (admission/model details: operators only)
 GET  /metrics            Prometheus text: requests, 429s, latency/TTFT quantiles, tokens
 
 Request path for /v1/ask:
@@ -255,13 +255,15 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         p = await principal(authorization, request)
         if authorization and p is None:
             return _error(401, "missing or invalid API key")
-        doc = app.state.documents.find(document_id)
-        if doc is None:
-            raise HTTPException(404, "No such document")
+        # Check credentials before looking the id up, so an anonymous caller gets the same answer whether
+        # or not a restricted document exists (no enumeration of the private manifest).
         if not s.email_auth_enabled:
             return _error(403, "Restricted documents are unavailable while sign-in is disabled.", email_login=False)
         if p is None or p.role == "guest":
             return _error(401, "Sign in with your @iisc.ac.in email to open this document.", login_required=True)
+        doc = app.state.documents.find(document_id)
+        if doc is None:
+            raise HTTPException(404, "No such document")
         if doc["access_scope"] not in p.scopes:
             return _error(403, "This document requires faculty access.")
         path = app.state.documents.path(doc)
@@ -427,7 +429,14 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             return _error(401, "missing or invalid API key")
         if len(chunk_id)>128:
             raise HTTPException(404, "No such source")
-        src = await asyncio.to_thread(app.state.retrieval.source, chunk_id, p.scopes)
+        lookup = app.state.retrieval.source
+        if asyncio.iscoroutinefunction(lookup):          # remote retrieval service
+            try:
+                src = await lookup(chunk_id, p.scopes)
+            except RetrievalUnavailable:
+                return _error(503, "Retrieval is temporarily unavailable")
+        else:
+            src = await asyncio.to_thread(lookup, chunk_id, p.scopes)
         if src is None or src.get('access_scope') not in p.scopes:
             raise HTTPException(404, "no such source in the active snapshot for your access level")
         visible, _ = audit_evidence([src], {}, p.scopes, app.state.documents)
@@ -442,8 +451,16 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
     ready_lock = asyncio.Lock()
     ready_cache = {'until': 0, 'retrieval': False, 'model': False}
 
+    async def operator(authorization, request) -> bool:
+        """Same rule as /metrics: any valid credential in a key-file deployment, admin/staff when the
+        deployment also serves anonymous or guest users. Anonymous probes are not counted as 401s."""
+        if not authorization and not (s.email_auth_enabled and request.cookies.get(COOKIE)):
+            return False
+        p = await principal(authorization, request)
+        return p is not None and not (public and p.role not in {'admin', 'staff'})
+
     @app.get("/readyz")
-    async def readyz():
+    async def readyz(request: Request, authorization: str | None = Header(default=None)):
         async with ready_lock:
             if time.monotonic() >= ready_cache['until']:
                 try:
@@ -453,18 +470,20 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                     r_ok = g_ok = False
                 ready_cache.update(until=time.monotonic()+5, retrieval=r_ok, model=g_ok)
         r_ok, g_ok = ready_cache['retrieval'], ready_cache['model']
-        body = {"retrieval": r_ok, "model_endpoint": g_ok, "model": s.served_model,
-                "admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared"}
-        body["model_info"] = getattr(app.state.generator, "identity", None)
         graph_status = getattr(app.state.retrieval, "graph_status", None)
-        if graph_status is not None:
-            body["graph"] = graph_status()           # degraded (vector-only) but still ready
+        graph = graph_status() if graph_status is not None else {"available": True, "reason": None}
+        # Anonymous callers get liveness only; tenants, counters, limits and model details need operator access.
+        body = {"status": "ready" if (r_ok and g_ok) else "unavailable", "retrieval": r_ok,
+                "model_endpoint": g_ok, "model": s.served_model, "degraded": not graph.get("available", True)}
+        if await operator(authorization, request):
+            body.update({"admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared",
+                         "model_info": getattr(app.state.generator, "identity", None),
+                         "graph": graph})          # degraded (vector-only) but still ready
         return JSONResponse(body, status_code=200 if (r_ok and g_ok) else 503)
 
     @app.get("/metrics")
     async def metrics(request: Request, authorization: str | None = Header(default=None)):
-        p = await principal(authorization, request)
-        if p is None or (public and p.role not in {'admin','staff'}):
+        if not await operator(authorization, request):
             raise HTTPException(404, 'Not found')
         return PlainTextResponse(app.state.metrics.prometheus(app.state.admission.snapshot()))
 

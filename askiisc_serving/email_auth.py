@@ -144,12 +144,14 @@ class EmailAuth:
             challenge, code = secrets.token_urlsafe(24), f'{secrets.randbelow(1000000):06d}'
             c.execute('INSERT OR REPLACE INTO challenges(id,email,digest,expires,attempts) VALUES (?,?,?,?,0)',
                       (challenge, email, self._digest(c, challenge, code), now + self.s.otp_ttl))
-            c.execute('INSERT INTO sends VALUES (?,?,?)', (email, ip, now))
+            send_row = c.execute('INSERT INTO sends VALUES (?,?,?)', (email, ip, now)).lastrowid
         try:
             self.mailer.send(email, code)
         except Exception:
+            # A send that never left the server must not cost the user a cooldown or quota.
             with self._db() as c:
                 c.execute('DELETE FROM challenges WHERE id=?', (challenge,))
+                c.execute('DELETE FROM sends WHERE rowid=?', (send_row,))
             # Do not disclose SMTP credentials, recipient addresses or provider error bodies.
             raise AuthError(503, 'The code could not be sent. Please try again later.') from None
         return {'challenge_id': challenge, 'expires_in': self.s.otp_ttl,

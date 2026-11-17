@@ -76,6 +76,12 @@ class Retriever:
         if snap.embedding_model != self.embedder.model_id:
             raise EmbeddingModelMismatch(
                 f"query embedder {self.embedder.model_id!r} != snapshot model {snap.embedding_model!r}")
+        # FR-4: the graph in memory must be the one this snapshot was built with. After an in-place rebuild
+        # (new snapshot on disk, old graph loaded), answer vector-only and say so until the graph is reloaded.
+        graph_mismatch = bool(use_graph and snap.graph_sha256 and getattr(self.graph, "sha256", None)
+                              and snap.graph_sha256 != self.graph.sha256)
+        if graph_mismatch:
+            use_graph = False
         info = analyse(query, self.today_term)
         t = lap("analyse", t0)
 
@@ -235,6 +241,8 @@ class Retriever:
 
         if use_graph and getattr(self.graph, "unavailable", None):
             degraded, reason = True, f"graph unavailable: {self.graph.unavailable}"
+        if graph_mismatch:
+            degraded, reason = True, "graph does not match the active snapshot (restart to load the new graph)"
 
         proof_passages, graph_proofs, connection_status = [], [], None
         if use_graph:

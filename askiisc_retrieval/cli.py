@@ -101,9 +101,22 @@ def cmd_ingest(a):
         sys.exit("Nothing to ingest. Run `fetch` first.")
     config.DATA.mkdir(exist_ok=True)
     emb = make_embedder()
-    store = make_store(reset=True)                       # stub rebuilds from scratch each time
-    rep = build_index(pages, emb, store, config.GRAPH_PATH, config.SNAPSHOT_PATH, config.CHUNKS_PATH)
-    store.close()
+    # FR-4: never empty the live store before a rebuild. New versions are added next to the old ones; the
+    # snapshot switches only after the build succeeds, and only then are versions it no longer uses removed.
+    # A failed rebuild leaves the previous snapshot, its vectors and its graph serving.
+    store = make_store()
+    size = store.vector_size()
+    if size is not None and size != config.EMBED_DIM:
+        # A different embedding size cannot share the collection; the old snapshot is for another
+        # embedding model and cannot be served by this configuration anyway.
+        print(f"Embedding size changed ({size} -> {config.EMBED_DIM}); starting a new collection.", file=sys.stderr)
+        store.close()
+        store = make_store(reset=True)
+    try:
+        rep = build_index(pages, emb, store, config.GRAPH_PATH, config.SNAPSHOT_PATH, config.CHUNKS_PATH)
+        store.prune(rep["built_versions"])
+    finally:
+        store.close()
     print()
     for p in rep["pages"]:
         if "version_id" in p:
@@ -111,6 +124,12 @@ def cmd_ingest(a):
             print(f"  {p['chunks']:4d} chunks  terms {p['terms']:<22} {p['url']}{flag}")
         else:
             print(f"  {p['status']}: {p['url']}")
+    if rep.get("failures"):
+        failures_path = config.DATA / "extraction_failures.json"
+        from .snapshot import atomic_write_text
+        import json as _json
+        atomic_write_text(failures_path, _json.dumps(rep["failures"], indent=2))
+        print(f"\n!! {len(rep['failures'])} page(s) failed extraction and were not indexed (see {failures_path})")
     if rep.get("template_removed"):
         parts = ", ".join(f"'{h}' x{n}" for h, n in sorted(rep["template_removed"].items(), key=lambda kv: -kv[1]))
         print(f"\nRemoved repeated site-template sections: {parts}")

@@ -216,7 +216,12 @@ def test_sources_and_original_files_cannot_bypass_login(stack, auth):
     for x in protected: assert c.get('/v1/sources/' + x.chunk_id).status_code == 404
     assert c.get('/v1/documents/student-course-schedule-ad2026').status_code == 401
     assert c.get('/v1/documents/faculty-exam-timetable-ad2026').status_code == 401
+    # #13: an unknown id looks the same as a restricted one before sign-in (no manifest enumeration)
+    missing = c.get('/v1/documents/this-does-not-exist')
+    existing = c.get('/v1/documents/student-course-schedule-ad2026')
+    assert missing.status_code == existing.status_code == 401 and missing.json() == existing.json()
     otp_login(c, auth, 'student@iisc.ac.in')
+    assert c.get('/v1/documents/this-does-not-exist').status_code == 404
     assert c.get('/v1/documents/faculty-exam-timetable-ad2026').status_code == 403
     for x in protected:
         response = c.get('/v1/sources/' + x.chunk_id)

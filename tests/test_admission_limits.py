@@ -99,10 +99,11 @@ def test_http_c20_q10_burst_admits_twenty_queues_ten_and_rejects_one():
                 denied=next(r for r in results if r.status_code==429)
                 assert denied.json()['reason']=='tenant_queue_full' and int(denied.headers['retry-after'])>=1
                 assert all(r.json()['status']=='answered' for r in results if r.status_code==200)
-                state=(await client.get('/readyz')).json()['admission']
+                state=app.state.admission.snapshot()
                 assert state['global_active']==0 and state['tenants']['public']['waiting']==0
                 assert state['limits']['tenant_concurrency']==20 and state['limits']['tenant_queue']==10
-                assert (await client.get('/readyz')).json()['anonymous_rate_scope']=='shared'
+                ready=(await client.get('/readyz')).json()      # anonymous: liveness only
+                assert ready['retrieval'] and 'admission' not in ready
     asyncio.run(check())
 
 
