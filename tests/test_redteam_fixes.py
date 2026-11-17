@@ -688,3 +688,19 @@ def test_snapshot_reader_picks_up_a_replaced_file(tmp_path):
     assert provider.active().snapshot_id == "snap-a" and provider.active() is provider.active()   # cached
     JsonSnapshotProvider.write(path, Snapshot("snap-b", "hash", "g1", frozenset({"v1"})))
     assert provider.active().snapshot_id == "snap-b"
+
+
+# ------------------------------------------------- credential in docker-compose.yml (#27)
+def test_no_credentials_are_hard_coded_in_compose_or_config_files():
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    auth = re.search(r"NEO4J_AUTH:\s*(.+)", compose).group(1)
+    assert "${NEO4J_PASSWORD" in auth                      # read from the git-ignored .env, never a literal
+    secret = re.compile(r"(?i)(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*['\"]?(?!\$\{)[A-Za-z0-9!@#%^&*_+=./-]{6,}")
+    for path in [root / "docker-compose.yml", *root.glob("config/*.json"), *root.glob("config/*.yaml")]:
+        text = path.read_text(encoding="utf-8")
+        hits = [m.group(0) for m in secret.finditer(text) if "example" not in path.name and "change-me" not in m.group(0)]
+        assert not hits, f"{path.name}: {hits}"
+    assert ".env" in (root / ".gitignore").read_text()
