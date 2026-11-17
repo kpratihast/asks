@@ -362,8 +362,10 @@ def test_failed_otp_email_costs_no_cooldown_or_quota(tmp_path):
 # ------------------------------------------------------------------ FR-12 CSP hash on Windows (#17)
 def test_csp_hash_matches_served_script_bytes_on_any_locale(monkeypatch):
     """The browser hashes the bytes it receives. Hash those, not a locale-decoded string (cp1252 on Windows)."""
-    import base64, hashlib, re, locale
-    monkeypatch.setattr(locale, "getpreferredencoding", lambda *a, **k: "cp1252")
+    import base64, hashlib, re, pathlib
+    real = pathlib.Path.read_text                     # a Windows host decodes text files as cp1252 by default
+    monkeypatch.setattr(pathlib.Path, "read_text", lambda self, encoding=None, errors=None, newline=None:
+                        real(self, encoding=encoding or "cp1252", errors=errors))
     c, _ = make(FakeModel("Taught by Yogesh Simmhan [S1]."))
     with c:
         r = c.get("/")
