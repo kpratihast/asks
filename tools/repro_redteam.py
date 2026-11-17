@@ -247,5 +247,15 @@ def _():
     ok = all("'sha256-" + base64.b64encode(hashlib.sha256(s).digest()).decode() + "'" in r.headers["content-security-policy"] for s in scripts)
     return f"CSP hash matches the served script={ok} ({'UI runs' if ok else 'browser blocks the UI'})"
 
-for k in sorted(RESULTS, key=lambda s: int(s.split()[0][1:])):
+@case("Cloudhack: placeholder keys in serving_keys.example.yaml")
+def _():
+    from askiisc_serving.auth import KeyStore
+    try:
+        store = KeyStore.from_file(REPO / "serving_keys.example.yaml")
+    except ValueError as e:
+        return f"refused at load time: {str(e)[:90]}"
+    admin = store.lookup("Bearer REPLACE-with-a-random-key-admin-00000001")
+    return f"loaded {len(store.tenants)} tenants; placeholder admin key accepted={admin is not None} (role={admin.role if admin else None})"
+
+for k in sorted(RESULTS, key=lambda s: (not s.startswith("#"), int(s.split()[0][1:]) if s.startswith("#") else 0, s)):
     print(f"{k:<50} {RESULTS[k]}")

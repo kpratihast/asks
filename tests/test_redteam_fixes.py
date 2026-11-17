@@ -704,3 +704,63 @@ def test_no_credentials_are_hard_coded_in_compose_or_config_files():
         hits = [m.group(0) for m in secret.finditer(text) if "example" not in path.name and "change-me" not in m.group(0)]
         assert not hits, f"{path.name}: {hits}"
     assert ".env" in (root / ".gitignore").read_text()
+
+
+# ------------------------------------------- published placeholder keys accepted (Cloudhack)
+def test_placeholder_keys_from_the_example_file_are_rejected(tmp_path):
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    with pytest.raises(ValueError, match="placeholder key"):
+        KeyStore.from_file(root / "serving_keys.example.yaml")
+    for key in ["REPLACE-with-a-random-key-admin-00000001", "replace-with-something-long-enough"]:
+        with pytest.raises(ValueError, match="placeholder key"):
+            KeyStore({key: {"tenant": "office", "role": "admin"}})
+    s = Settings(email_auth_enabled=False, keys_file=root / "serving_keys.example.yaml", served_model="m")
+    with pytest.raises(ValueError, match="placeholder key"):
+        with TestClient(_app(s, keys=None)):
+            pass
+
+
+def test_make_keys_writes_random_loadable_keys(tmp_path):
+    import subprocess, sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    out = tmp_path / "keys.yaml"
+    r = subprocess.run([sys.executable, str(root / "tools" / "make_keys.py"), str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    store = KeyStore.from_file(out)
+    assert {p.role for p in store._keys.values()} == {"guest", "student", "faculty", "admin"}
+    assert all(len(k) >= 40 for k in store._keys)
+    again = subprocess.run([sys.executable, str(root / "tools" / "make_keys.py"), str(out)], capture_output=True, text=True)
+    assert again.returncode == 1                       # never overwrites existing keys
+
+
+def test_stated_count_that_does_not_match_the_list_is_a_contradiction():
+    from askiisc_serving.grounding import count_mismatch
+    q09 = ("CDS offers three types of degrees based on coursework or through research [S1]. "
+           "The three degree programs are:\n\n1. Ph.D. [S4]\n2. M.Tech.(Research) [S4]\n3. M.Tech.(CDS) [S2]\n"
+           "4. B.Tech. Math and Computing [S1]\n5. M.Tech.(CDS) (Computational and Data Science) [S2]\n"
+           "6. M.Tech.(CDS) (Research) [S4]\n\nThese are examples of the degree programs offered by CDS.")
+    assert count_mismatch(q09) == "states 3 but lists 6"
+    _, info = ground(q09, [{**FEE, "prompt_marker": m} for m in ("S1", "S2", "S4")], ABSTAIN, "Which degrees?")
+    assert info["self_contradiction"] and info["count_mismatch"]
+    ok = "CDS offers three degree programmes:\n\n1. Ph.D. [S1]\n2. M.Tech. (Research) [S1]\n3. M.Tech. (CDS) [S1]"
+    assert count_mismatch(ok) is None
+    assert count_mismatch("Students take 36 credits of coursework over 2 semesters [S1].") is None
+    assert count_mismatch("[S4] mentions two labs: DREAM Lab and MARS Lab.") is None
+
+
+def test_issue_3_cases_do_not_reach_the_user_as_answers():
+    """The five cases in #3, through the API: each is excerpts (contradiction) or has the invented claim removed."""
+    cases = {
+        "fee": ("The application fee is Rs. 800 for General candidates [S1].\n\n"
+                "I could not find the application fee for the PhD programme in the available IISc sources."),
+        "t17": ("Software and Runtime Systems covers:\n\n* Middleware for Batch Systems [S1]\n"
+                "* Examples of these topics are not explicitly mentioned in the available sources."),
+        "q09": "CDS offers three types of degrees [S1]:\n\n1. Ph.D. [S1]\n2. M.Tech. [S1]\n3. B.Tech. [S1]\n4. M.Sc. [S1]",
+    }
+    for name, answer in cases.items():
+        c, _ = make(FakeModel(answer), regenerate_on_bad_citations=False)
+        with c:
+            out = c.post("/v1/ask", json={"question": "Which degrees does CDS offer?"}, headers=H()).json()
+        assert out["status"] == "fallback" and out["reason"] == "self_contradiction" and out["answer"] is None, name

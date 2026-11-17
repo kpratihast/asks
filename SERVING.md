@@ -34,7 +34,7 @@ Ollama serves the same OpenAI-compatible API as vLLM, so the code does not chang
 # once: install Ollama from ollama.com, then
 ollama pull llama3.2:1b          # 1.3 GB; use llama3.2:3b (2 GB) if you have the memory
 # keys (never commit the real file)
-copy serving_keys.example.yaml serving_keys.yaml   # then edit: put long random keys
+python tools/make_keys.py serving_keys.yaml        # random keys; the example's placeholders are rejected
 conda activate askiisc
 docker compose up -d qdrant
 $env:QDRANT_URL       = "http://127.0.0.1:6333"
