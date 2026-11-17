@@ -764,3 +764,58 @@ def test_issue_3_cases_do_not_reach_the_user_as_answers():
         with c:
             out = c.post("/v1/ask", json={"question": "Which degrees does CDS offer?"}, headers=H()).json()
         assert out["status"] == "fallback" and out["reason"] == "self_contradiction" and out["answer"] is None, name
+
+
+_KILLED_REBUILD = r"""
+import sys, time
+from pathlib import Path
+d = Path(sys.argv[1]); sys.path[:0] = [sys.argv[2], sys.argv[2] + "/tests"]
+from askiisc_retrieval import cli, config
+from askiisc_retrieval.stores import HashEmbedder
+from test_redteam_fixes import _pages
+for k, v in {"DATA": d, "GRAPH_PATH": d / "graph.json", "QDRANT_URL": None, "SNAPSHOT_PATH": d / "snapshot.json",
+             "CHUNKS_PATH": d / "chunks.jsonl", "QDRANT_PATH": d / "qdrant", "EMBED_DIM": HashEmbedder().dim}.items():
+    setattr(config, k, v)
+class Slow(HashEmbedder):
+    def embed_documents(self, texts):
+        (d / "embedding-started").write_text("1")
+        time.sleep(60)                              # killed here, part-way through the refresh
+        return super().embed_documents(texts)
+cli.safe_rebuild(_pages(), Slow())
+"""
+
+
+def test_killed_rebuild_through_the_launcher_path_keeps_the_live_index(tmp_path, monkeypatch):
+    """Cloudhack's evidence on #15: `./run-local.sh --rebuild` killed (SIGKILL, OOM, Ctrl-C) part-way through
+    embedding left 0 vectors under the old snapshot. The launcher now uses the same safe rebuild as `cli ingest`."""
+    import inspect, subprocess, sys
+    from pathlib import Path
+    from askiisc_retrieval import cli, config
+    from tools import local
+    assert "safe_rebuild" in inspect.getsource(local.prepare) and ".reset()" not in inspect.getsource(local.prepare)
+    root = Path(__file__).resolve().parents[1]
+    for k, v in {"DATA": tmp_path, "GRAPH_PATH": tmp_path / "graph.json", "QDRANT_URL": None,
+                 "SNAPSHOT_PATH": tmp_path / "snapshot.json", "CHUNKS_PATH": tmp_path / "chunks.jsonl",
+                 "QDRANT_PATH": tmp_path / "qdrant", "EMBED_DIM": HashEmbedder().dim}.items():
+        monkeypatch.setattr(config, k, v)
+    cli.safe_rebuild(_pages(), HashEmbedder())               # the live index before the refresh
+    before = (tmp_path / "snapshot.json").read_text()
+    script = tmp_path / "killed_rebuild.py"
+    script.write_text(_KILLED_REBUILD)
+    proc = subprocess.Popen([sys.executable, str(script), str(tmp_path), str(root)])
+    try:
+        for _ in range(600):
+            if (tmp_path / "embedding-started").exists() or proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        assert (tmp_path / "embedding-started").exists(), "rebuild never reached embedding"
+    finally:
+        proc.kill()                                          # SIGKILL on Linux, TerminateProcess on Windows
+        proc.wait(timeout=30)
+    assert (tmp_path / "snapshot.json").read_text() == before
+    store = cli.make_store()
+    try:
+        assert store.count() > 0
+        assert _retriever(tmp_path, store).retrieve("DS 252", ["public"]).passages     # still answers
+    finally:
+        store.close()
