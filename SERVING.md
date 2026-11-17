@@ -91,7 +91,7 @@ Response (`status` is what the client must act on):
 | status | meaning | client shows |
 |---|---|---|
 | `answered` | answer passed the citation check | `answer`; `citations` resolve [S#] to title, URL, version, excerpt |
-| `abstained` | `insufficient_evidence` (model not called) or `model_abstained` | "I could not find this in the CDS pages." (+ `sources_that_may_help`) |
+| `abstained` | `insufficient_evidence` (model not called) or `model_abstained` | "I could not find this in the available IISc sources." (+ `sources_that_may_help`) |
 | `fallback` | `generation_unavailable` or `citation_check_failed` | `excerpts`: source titles, links, excerpts; no generated text |
 
 Always present: `trace` (snapshot id, mode, `timings_ms`: queue, retrieval, prompt, ttft, generation,

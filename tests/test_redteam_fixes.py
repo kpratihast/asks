@@ -819,3 +819,13 @@ def test_killed_rebuild_through_the_launcher_path_keeps_the_live_index(tmp_path,
         assert _retriever(tmp_path, store).retrieve("DS 252", ["public"]).passages     # still answers
     finally:
         store.close()
+
+
+# ---------------------------------------------- docs state the real abstention text (Nimbus doc issue)
+def test_docs_quote_the_abstention_text_the_gateway_returns():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    for name in ("SERVING.md", "INTEGRATION.md"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert ABSTAIN in text, name
+        assert "could not find this in the CDS pages" not in text, name
