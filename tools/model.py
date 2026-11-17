@@ -157,10 +157,10 @@ def stop(timeout):
 
 def command(profile, executable, fraction):
     # Override inherited model-specific environment settings for reproducible switching.
-    return ['env', 'VLLM_METAL_USE_PAGED_ATTENTION=1', f'VLLM_METAL_MEMORY_FRACTION={fraction}',
+    return ['env', '-u', 'VLLM_METAL_USE_PAGED_ATTENTION', '-u', 'VLLM_METAL_MEMORY_FRACTION',
             str(executable), 'serve', profile.repo, '--served-model-name', ALIAS,
             '--host', '127.0.0.1', '--port', str(PORT), '--max-model-len', '4096',
-            '--max-num-seqs', '1', '--enable-prefix-caching']
+            '--max-num-seqs', '1', '--gpu-memory-utilization', str(fraction), '--enable-prefix-caching']
 
 
 def cache_model(profile, python, offline):

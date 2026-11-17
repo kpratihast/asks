@@ -140,7 +140,7 @@ def test_model_abstention_is_reported_as_abstained():
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("position", ["after", "same_paragraph"])
 def test_cited_answer_survives_refusal_boilerplate(stream, position):
-    partial = "The source lists the semester venue as CDS 202 [S1]. A room number for the tutorial is unavailable."
+    partial = "The source lists Yogesh Simmhan as the instructor [S1]. A room number for the tutorial is unavailable."
     answer = {"after": partial + "\n\n" + ABSTAIN,
               "same_paragraph": partial + " " + ABSTAIN}[position]
     c, _ = make(FakeModel(answer))
@@ -197,9 +197,11 @@ def test_generation_outage_returns_excerpts_not_an_error():
 
 def test_no_retrieval_baseline_b0():
     model = FakeModel("Probably Prof. X.")
-    c, ret = make(model)
+    admin = "evaluation-admin-0123456789abcdef"
+    c, ret = make(model, allow_no_retrieval=True)
+    c.app.state.keys = KeyStore({admin: {"tenant": "evaluation", "role": "admin"}})
     with c:
-        out = ask(c, mode="none").json()
+        out = ask(c, key=admin, mode="none").json()
     assert out["status"] == "answered" and out["grounded"] is False and out["reason"] == "no_retrieval_baseline"
     assert "Evidence" not in model.requests[0]["messages"][1]["content"]
 

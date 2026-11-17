@@ -41,9 +41,20 @@ pages:
 # Bounded crawl of the CDS site (added 2026-10-08). The corpus is defined by the site's own links, not by
 # any question set. Pages listed above keep their doc_type and are never re-downloaded. Pages the crawl
 # finds are added with a doc_type inferred from their URL. See askiisc_retrieval/crawl.py for the rules.
+# Links in the shared navigation, header and footer are not followed (FR-1), so the section root pages
+# the menu used to lead to are listed as seeds: the approved policy, admissions, course-catalogue and
+# people roots. Linked PDFs within the depth limit are downloaded and parsed (FR-1).
 crawl:
-  seeds: ["https://cds.iisc.ac.in/"]
-  max_depth: 2        # clicks from the homepage
+  seeds:
+    - "https://cds.iisc.ac.in/"
+    - "https://cds.iisc.ac.in/courses/descriptions/"
+    - "https://cds.iisc.ac.in/courses/schedule/"
+    - "https://cds.iisc.ac.in/courses/m-tech-course-requirements/"
+    - "https://cds.iisc.ac.in/academics/degree-programs/"
+    - "https://cds.iisc.ac.in/admissions/course-degrees/"
+    - "https://cds.iisc.ac.in/admissions/research-degrees/"
+    - "https://cds.iisc.ac.in/people-all/faculty/"
+  max_depth: 2        # clicks from a seed
   max_pages: 200      # hard cap (CPU embedding time grows with this)
   delay_s: 0.5        # politeness delay between downloads
 

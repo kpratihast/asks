@@ -61,6 +61,8 @@ class KeyStore:
             if role not in ROLE_SCOPES:
                 raise ValueError(f"unknown role {role!r} for tenant {v.get('tenant')}; "
                                  f"use one of {sorted(ROLE_SCOPES)}")
+            if k.lower().startswith(("replace-", "changeme", "your-api-key", "<")):
+                raise ValueError("Replace example API keys with newly generated secrets")
             if len(k) < 16:
                 raise ValueError("API keys must be at least 16 characters")
             self._keys[k] = Principal(f"{v.get('tenant', 'default')}#{i}", v.get("tenant", "default"), role)

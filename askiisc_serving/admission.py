@@ -70,32 +70,36 @@ class Admission:
         if wait:
             self.stats["rejected_rate"] += 1
             raise Rejected("rate_limited", wait)
-        async with self.changed:
-            t = self.tenants.setdefault(tenant, _Tenant())
-            if t.active >= self.c or self.global_active >= self.global_limit or t.waiting:
-                if t.waiting >= self.q:
-                    if self.q == 0 and self.global_active >= self.global_limit:
-                        self.stats["rejected_global"] += 1
-                        raise Rejected("server_busy", 2)
-                    self.stats["rejected_queue_full"] += 1
-                    raise Rejected("tenant_queue_full", 2)
-                ticket = object()
-                t.tickets.append(ticket)
-                try:
-                    await asyncio.wait_for(self.changed.wait_for(
-                        lambda: t.tickets[0] is ticket and t.active < self.c and self.global_active < self.global_limit
-                    ), self.wait)
-                except asyncio.TimeoutError:
-                    self.stats["rejected_queue_timeout"] += 1
-                    raise Rejected("queue_timeout", 2)
-                finally:
-                    # Timeouts and disconnected/cancelled clients must not strand queue entries.
-                    t.tickets.remove(ticket)
-                    self.changed.notify_all()
-            t.active += 1
-            self.global_active += 1
-            self.stats["admitted"] += 1
-            return Slot(self, t)
+        try:
+            async with self.changed:
+                t = self.tenants.setdefault(tenant, _Tenant())
+                if t.active >= self.c or self.global_active >= self.global_limit or t.waiting:
+                    if t.waiting >= self.q:
+                        if self.q == 0 and self.global_active >= self.global_limit:
+                            self.stats["rejected_global"] += 1
+                            raise Rejected("server_busy", 2)
+                        self.stats["rejected_queue_full"] += 1
+                        raise Rejected("tenant_queue_full", 2)
+                    ticket = object()
+                    t.tickets.append(ticket)
+                    try:
+                        await asyncio.wait_for(self.changed.wait_for(
+                            lambda: t.tickets[0] is ticket and t.active < self.c and self.global_active < self.global_limit
+                        ), self.wait)
+                    except asyncio.TimeoutError:
+                        self.stats["rejected_queue_timeout"] += 1
+                        raise Rejected("queue_timeout", 2)
+                    finally:
+                        # Timeouts and disconnected/cancelled clients must not strand queue entries.
+                        t.tickets.remove(ticket)
+                        self.changed.notify_all()
+                t.active += 1
+                self.global_active += 1
+                self.stats["admitted"] += 1
+                return Slot(self, t)
+        except BaseException:
+            b.tokens = min(b.capacity, b.tokens + 1)
+            raise
 
     def snapshot(self) -> dict:
         return {"global_active": self.global_active, **self.stats,

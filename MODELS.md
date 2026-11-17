@@ -1,6 +1,6 @@
 # Switching the local Llama server
 
-Run these commands from `askiisc-retrieval`:
+Run these commands from `asks`:
 
 ```bash
 ./model.sh 3b               # Llama 3.2 3B, BF16
@@ -89,3 +89,18 @@ overrides it. The launcher uses `ASKIISC_PYTHON`, a project `.venv`, the saved
 Python's standard library plus the `tmux`, `lsof`, and `ps` commands. Checkpoint download
 uses `huggingface_hub` from the inference environment. First-time downloads require
 network access and sufficient disk space; offline mode uses cached files only.
+
+
+## Install vLLM-Metal
+
+Use the [upstream installer](https://docs.vllm.ai/projects/vllm-metal/en/latest/installation/) for Apple Silicon on macOS 15 or later. The launcher expects its environment at ~/.venv-vllm-metal. Download and review the installer before executing it.
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/vllm-project/vllm-metal/main/install.sh -o /tmp/vllm-metal-install.sh
+less /tmp/vllm-metal-install.sh
+bash /tmp/vllm-metal-install.sh --stable
+source ~/.venv-vllm-metal/bin/activate
+vllm serve --help
+~~~
+
+The launcher passes --gpu-memory-utilization explicitly and clears obsolete Metal overrides. Runtime allocation still needs validation on the target Mac.

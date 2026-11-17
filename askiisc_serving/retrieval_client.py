@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import re
 
+from askiisc_retrieval.citations import chunk_source
 from askiisc_retrieval.config import current_term
 
 MODES = ("full", "vector", "none")
@@ -92,6 +93,36 @@ def _filter_year(hits: list[dict], year: str | None) -> list[dict]:
     return [h for h in hits if not h["academic_term"] or h["academic_year"] == year]
 
 
+def _filter_programme(hits: list[dict], programme: str | None) -> tuple[list[dict], dict | None]:
+    """Apply the request's programme filter (PRD Sec. 6: programme/year filters). A source that names a
+    different programme in its title or section is dropped; general sources that name none are kept. The
+    trace says whether the filter was applied, so an unrecognised value is never a silent no-op."""
+    if not programme:
+        return hits, None
+    from askiisc_retrieval.policy_graph import programmes
+    wanted = set(programmes(programme))
+    if not wanted:
+        return hits, {"requested": programme, "applied": False, "reason": "unrecognised programme"}
+
+    def source_programmes(h):
+        named = h.get("programme")
+        named = programmes(named) if named and named != "not specified" else []
+        return set(named or programmes(h.get("section") or "") or programmes(h.get("title") or ""))
+
+    kept = [h for h in hits if not source_programmes(h) or not wanted.isdisjoint(source_programmes(h))]
+    return kept, {"requested": programme, "applied": True, "programmes": sorted(wanted),
+                  "removed": len(hits) - len(kept)}
+
+
+def _scoped(d: dict, mode: str, programme, academic_year_, scopes) -> tuple[list[dict], dict]:
+    hits = [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes]
+    hits, applied = _filter_programme(hits, programme)
+    trace = _trace(d, mode)
+    if applied is not None:
+        trace["programme_filter"] = applied
+    return hits, trace
+
+
 def _trace(d: dict, mode: str) -> dict:
     return {"mode": mode, "snapshot_id": d.get("snapshot_id"),
             "departments": d.get("departments", []), "department_status": d.get("department_status"),
@@ -109,6 +140,10 @@ class LocalRetrieval:
 
     def snapshot_id(self) -> str:
         return self.r.snapshots.active().snapshot_id
+
+    def graph_status(self) -> dict:
+        reason = getattr(getattr(self.r, "graph", None), "unavailable", None)
+        return {"available": reason is None, "reason": reason}
 
     async def run(self, question, pinned, mode, programme, academic_year_, *, scopes):
         from askiisc_retrieval.citations import result_to_dict
@@ -129,17 +164,11 @@ class LocalRetrieval:
         d = result_to_dict(res)
         if pinned and d["snapshot_id"] != pinned:
             raise SnapshotMismatch("Snapshot changed during retrieval")
-        return [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes], _trace(d, mode)
+        return _scoped(d, mode, programme, academic_year_, scopes)
 
     def source(self, chunk_id: str, scopes: list[str]) -> dict | None:
         """Full text of one cited chunk, only if it is in the active snapshot and the caller's scopes."""
-        snap = self.r.snapshots.active()
-        for c in self.r.store.get([chunk_id]):
-            if c.version_id in snap.active_version_ids and c.access_scope in scopes:
-                return {"chunk_id": c.chunk_id, "title": c.title, "section": c.section_heading,
-                        "url": c.source_url, "version_id": c.version_id, "academic_term": c.academic_term,
-                        "text": c.text, "access_scope": c.access_scope}
-        return None
+        return chunk_source(self.r, chunk_id, scopes)
 
     async def ready(self) -> bool:
         try:
@@ -188,13 +217,30 @@ class RemoteRetrieval:
                         or passage.get("version_id", citation["version_id"]) != citation["version_id"]
                         or passage.get("department", "") != citation.get("department", "")):
                     raise RetrievalUnavailable("Remote passage provenance does not match its citation")
-            hits = [h for h in _filter_year(hits_from_result(d), academic_year_) if h["access_scope"] in scopes]
-            return hits, _trace(d, mode)
+            return _scoped(d, mode, programme, academic_year_, scopes)
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             raise RetrievalUnavailable("Remote retrieval returned malformed evidence") from exc
 
-    def source(self, chunk_id, scopes):
-        return None
+    async def source(self, chunk_id: str, scopes: list[str]) -> dict | None:
+        """Resolve a citation through the retrieval service (FR-12). None if it is not in the active
+        snapshot for these scopes; RetrievalUnavailable if the service cannot be reached."""
+        headers = {"Authorization": "Bearer " + self.service_key} if self.service_key else {}
+        try:
+            r = await self.c.post(self.url + "/source", headers=headers,
+                                  json={"chunk_id": chunk_id, "scopes": list(scopes)})
+        except Exception as e:
+            raise RetrievalUnavailable(f"{type(e).__name__}: {e}") from e
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise RetrievalUnavailable(f"source lookup returned HTTP {r.status_code}")
+        try:
+            src = r.json()
+            if not isinstance(src, dict) or src.get("access_scope") not in scopes or src.get("chunk_id") != chunk_id:
+                raise RetrievalUnavailable("Remote source does not match the request")
+            return src
+        except ValueError as exc:
+            raise RetrievalUnavailable("Remote retrieval returned a malformed source") from exc
 
     async def ready(self) -> bool:
         try:

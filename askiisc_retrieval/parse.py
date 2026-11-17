@@ -62,7 +62,7 @@ def is_course_code(code: str) -> bool:
 
 def parse_term(text: str) -> str | None:
     """'2026-AUG' | '2026-JAN' | '2019-SUM', from the START month and the first year mentioned."""
-    m = TERM_RE.search(text)
+    m = TERM_RE.search(norm(text))
     if not m:
         return None
     year = m.group(2) or m.group(4) or m.group(5)

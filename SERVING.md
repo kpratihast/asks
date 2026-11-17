@@ -91,7 +91,7 @@ Response (`status` is what the client must act on):
 | status | meaning | client shows |
 |---|---|---|
 | `answered` | answer passed the citation check | `answer`; `citations` resolve [S#] to title, URL, version, excerpt |
-| `abstained` | `insufficient_evidence` (model not called) or `model_abstained` | "I could not find this in the CDS pages." (+ `sources_that_may_help`) |
+| `abstained` | `insufficient_evidence` (model not called) or `model_abstained` | "I could not find this in the available IISc sources." (+ `sources_that_may_help`) |
 | `fallback` | `generation_unavailable` or `citation_check_failed` | `excerpts`: source titles, links, excerpts; no generated text |
 
 Always present: `trace` (snapshot id, mode, `timings_ms`: queue, retrieval, prompt, ttft, generation,
@@ -109,7 +109,7 @@ Streaming does not regenerate; the JSON path regenerates once when citations are
 
 ### Others
 `GET /v1/sources/{chunk_id}` (full cited text, only if active and within the key's scope),
-`GET /healthz`, `GET /readyz` (retrieval + model endpoint), `GET /metrics` (Prometheus text).
+`GET /healthz`, `GET /readyz` (retrieval + model endpoint; admission and model details for authorized operators only), `GET /metrics` (Prometheus text, same authorization).
 
 ## 4. Settings (environment variables)
 
@@ -157,8 +157,15 @@ column against `expected_answer`.
 - On the 120-question set, retrieval alone would answer 3 of the 20 must-refuse questions (topic pages
   without the exact fact). The prompt rule 3 and the model's abstention must catch them: measure
   abstention end to end, never on retrieval alone.
-- Streaming shows text before the citation check; a failed check is signalled in `done` and the client
+- Streaming buffers text until citation checks pass. A failed check is signalled in `done` and the client
   must replace the text.
 - One process, models loaded once; scale by running more processes behind the gateway.
 - Kubernetes manifests are not included yet (PRD lists Kubernetes); the services run as plain processes or
   Docker containers.
+
+
+Anonymous chat requires PUBLIC_CHAT=1. Key-file deployments reject missing or invalid credentials. The no-retrieval baseline requires ALLOW_NO_RETRIEVAL=1 and an admin bearer key.
+
+Set AUTH_PUBLIC_ORIGIN for public HTTPS, or ALLOWED_HOSTS for a custom development host. Defaults permit loopback and the test client.
+
+SSE emits source metadata first and buffers answer text until validation finishes. Model ttft_ms measures the upstream provider. Measure browser-visible first-answer latency at the client. Buffered delivery is the security decision tracked in issue #26.

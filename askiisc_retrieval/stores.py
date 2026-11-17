@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import uuid
@@ -165,6 +166,20 @@ class QdrantStore:
             self.c.delete_collection(self.col)
         self._ensure()
 
+    def vector_size(self) -> int | None:
+        try:
+            params = self.c.get_collection(self.col).config.params.vectors
+            return getattr(params, "size", None)
+        except Exception:
+            return None
+
+    def prune(self, keep_version_ids) -> None:
+        """Delete points of versions no longer built. Called only after the new snapshot is active, so a
+        failed rebuild never removes what the previous snapshot serves (FR-4)."""
+        m = self.m
+        self.c.delete(self.col, points_selector=m.FilterSelector(filter=m.Filter(must_not=[
+            m.FieldCondition(key="version_id", match=m.MatchAny(any=sorted(keep_version_ids)))])))
+
     @staticmethod
     def point_id(chunk_id: str) -> str:
         return str(uuid.UUID(hashlib.md5(chunk_id.encode()).hexdigest()))
@@ -298,13 +313,39 @@ class JsonGraphStore:
             self.edges.append(e)
             self._index(e)
 
-    def save(self, path: Path):
-        path.write_text(json.dumps([asdict(e) for e in self.edges], indent=1), encoding="utf-8")
+    def save(self, path: Path) -> str:
+        """Atomic write; returns the file's SHA-256 so the snapshot can name the graph it belongs to."""
+        from .snapshot import atomic_write_text
+        text = json.dumps([asdict(e) for e in self.edges], indent=1)
+        atomic_write_text(path, text)
+        self.sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return self.sha256
+
+    unavailable: str | None = None      # why the graph could not be loaded; retrieval reports it as degraded
+    sha256: str | None = None           # of the loaded file; compared with the active snapshot (FR-4)
 
     @classmethod
     def load(cls, path: Path) -> "JsonGraphStore":
-        raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-        return cls([Edge(**{**e, "chunk_ids": tuple(e["chunk_ids"]), "qualifiers": tuple(tuple(q) for q in e.get("qualifiers", ()))}) for e in raw])
+        """A missing or unreadable graph file must not stop the service or be silently empty (FR-9):
+        the store loads empty, records why, and retrieval runs vector-only with degraded=True."""
+        if not path.exists():
+            store = cls([])
+            store.unavailable = f"{path.name} missing"
+            logging.getLogger("askiisc.retrieval").error("graph unavailable: %s not found; serving vector-only", path)
+            return store
+        try:
+            data = path.read_bytes()
+            raw = json.loads(data.decode("utf-8"))
+            store = cls([Edge(**{**e, "chunk_ids": tuple(e["chunk_ids"]),
+                                 "qualifiers": tuple(tuple(q) for q in e.get("qualifiers", ()))}) for e in raw])
+            store.sha256 = hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()   # same on any OS
+            return store
+        except (OSError, UnicodeDecodeError, ValueError, TypeError, KeyError) as exc:
+            store = cls([])
+            store.unavailable = f"{path.name} unreadable ({type(exc).__name__})"
+            logging.getLogger("askiisc.retrieval").error("graph unavailable: %s unreadable (%s); serving vector-only",
+                                                        path, exc)
+            return store
 
     def _check(self):
         if self.fail:

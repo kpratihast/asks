@@ -187,9 +187,15 @@ def pdf_html(path, title, *, max_pages=6, page_ranges=None, departments=()):
     from .parse import COURSE_HEADING_RE, norm
     from pypdf import PdfReader
 
-    if path.stat().st_size > MAX_SOURCE_BYTES:
-        raise ValueError('PDF exceeds the source size limit')
-    reader = PdfReader(path)
+    if isinstance(path, (bytes, bytearray)):         # PDF bytes from the crawl's raw store
+        import io
+        if len(path) > MAX_SOURCE_BYTES:
+            raise ValueError('PDF exceeds the source size limit')
+        reader = PdfReader(io.BytesIO(bytes(path)))
+    else:
+        if path.stat().st_size > MAX_SOURCE_BYTES:
+            raise ValueError('PDF exceeds the source size limit')
+        reader = PdfReader(path)
     if page_ranges is None:
         if len(reader.pages) > max_pages:
             raise ValueError('PDF page boundary exceeded')

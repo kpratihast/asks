@@ -43,6 +43,7 @@ def _model_base(value: str) -> str:
 
 @dataclass
 class Settings:
+    allow_no_retrieval: bool = field(default_factory=lambda: _b("ALLOW_NO_RETRIEVAL", False))
     # model endpoint (vLLM on the GPU; Ollama on a laptop: same OpenAI-compatible API)
     vllm_url: str = field(default_factory=lambda: os.environ.get("VLLM_URL", "http://127.0.0.1:8000"))
     served_model: str = field(default_factory=lambda: os.environ.get("SERVED_MODEL", "meta-llama/Llama-3.2-3B-Instruct"))
@@ -62,6 +63,10 @@ class Settings:
     regenerate_on_bad_citations: bool = field(default_factory=lambda: os.environ.get("REGENERATE", "1") == "1")
 
     # Optional public-document chat; disabled unless explicitly enabled by the local launcher.
+    # FR-8 fallbacks when the model server cannot report them (labelled "config" in responses).
+    model_checkpoint: str = field(default_factory=lambda: os.environ.get("MODEL_CHECKPOINT", ""))
+    model_precision: str = field(default_factory=lambda: os.environ.get("MODEL_PRECISION", ""))
+    model_revision: str = field(default_factory=lambda: os.environ.get("MODEL_REVISION", ""))
     public_chat: bool = field(default_factory=lambda: os.environ.get("PUBLIC_CHAT", "0") == "1")
 
     # Off = public-only mode, with email sessions and privileged API keys ignored.
