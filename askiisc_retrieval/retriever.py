@@ -62,6 +62,28 @@ class Retriever:
         self.audit_violations = 0                       # should stay 0 forever; surfaced in metrics
 
     # ------------------------------------------------------------------ public
+    def readiness(self) -> tuple[bool, str | None]:
+        """Can retrieval serve evidence now? (#45) Ready only when the active snapshot can be read, was built
+        with the configured query embedder, has active versions, and the index holds vectors for them.
+        Returns (ready, reason); `reason` names the first failed check."""
+        try:
+            snap = self.snapshots.active()
+        except Exception as exc:
+            return False, f"snapshot unavailable: {type(exc).__name__}: {exc}"
+        if snap.embedding_model != self.embedder.model_id:
+            return False, (f"embedding model mismatch: query embedder {self.embedder.model_id!r} != snapshot model "
+                           f"{snap.embedding_model!r} (rebuild the index or set ASKIISC_EMBED_MODEL to match)")
+        if not snap.active_version_ids:
+            return False, f"snapshot {snap.snapshot_id} has no active versions"
+        try:
+            count = getattr(self.store, "count_versions", None)
+            vectors = count(snap.active_version_ids) if count is not None else self.store.count()
+        except Exception as exc:
+            return False, f"vector store unavailable: {type(exc).__name__}: {exc}"
+        if not vectors:
+            return False, f"vector index holds no vectors for the {len(snap.active_version_ids)} active versions"
+        return True, None
+
     def retrieve(self, query: str, scopes: list[str], use_graph: bool = True,
                  use_rerank: bool = True) -> RetrievalResult:
         t0 = time.perf_counter()

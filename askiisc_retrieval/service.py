@@ -228,12 +228,16 @@ def create_app(retriever=None, service_key=None):
             info["store"] = getattr(rt.store, "backend", "?")
             if hasattr(rt.store, "stats"):
                 info["adapter"] = vars(rt.store.stats)
-            info["status"] = "ok"
+            ok, reason = rt.readiness()                      # #45: the gateway's /readyz follows this status
+            info["status"] = "ok" if ok else "not_ready"
+            if reason:
+                info["error"] = reason
         except Exception as e:
             info["status"], info["error"] = "down", f"{type(e).__name__}: {e}"
         g = rt.graph
         info["graph"] = None if g is None else {"edges": len(g.edges), **getattr(g, "stats", {}),
                                                 "error": getattr(g, "error", None)}
-        return info
+        from fastapi.responses import JSONResponse
+        return JSONResponse(info, status_code=200 if info["status"] == "ok" else 503)
 
     return app

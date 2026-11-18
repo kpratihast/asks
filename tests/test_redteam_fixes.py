@@ -979,3 +979,78 @@ def test_tokens_reach_the_client_before_generation_finishes():
     asyncio.run(run())
     first_token = log.index(("client", "token"))
     assert first_token < log.index(("model", "end"))
+
+
+# --------------------------------------- #45 /readyz reflects whether retrieval can serve evidence
+def test_readiness_requires_active_versions_vectors_and_a_matching_embedder(retriever, tmp_path):
+    import copy
+    import dataclasses
+    from types import SimpleNamespace
+    from askiisc_retrieval.stores import QdrantStore
+    assert retriever.readiness() == (True, None)                                       # healthy (control)
+    snap = retriever.snapshots.active()
+    r = copy.copy(retriever)
+    r.snapshots = SimpleNamespace(active=lambda: dataclasses.replace(snap, active_version_ids=frozenset()))
+    ok, reason = r.readiness()
+    assert not ok and "no active versions" in reason                                    # case 1
+    r.snapshots = SimpleNamespace(active=lambda: dataclasses.replace(snap, embedding_model="other/model"))
+    ok, reason = r.readiness()
+    assert not ok and "embedding model mismatch" in reason and "other/model" in reason  # case 3
+    r.snapshots = retriever.snapshots
+    r.store = QdrantStore("empty", retriever.embedder.dim, path=tmp_path / "qdrant")
+    try:
+        ok, reason = r.readiness()
+    finally:
+        r.store.close()
+    assert not ok and "no vectors" in reason                                            # case 2
+
+
+class _StubRetriever:
+    """Enough of a Retriever for LocalRetrieval: a snapshot id, a readiness verdict and a retrieve() outcome."""
+    graph = None
+
+    def __init__(self, ready=(True, None), error=None):
+        from types import SimpleNamespace
+        self.snapshots = SimpleNamespace(active=lambda: SimpleNamespace(snapshot_id="snap-test"))
+        self._ready, self._error = ready, error
+
+    def readiness(self):
+        return self._ready
+
+    def retrieve(self, *a):
+        raise self._error
+
+
+def _local_app(stub):
+    from askiisc_serving.retrieval_client import LocalRetrieval
+    s = Settings(served_model="test-model", vllm_url="http://model", public_chat=False, email_auth_enabled=False)
+    generator = Generator(s, client=httpx.AsyncClient(transport=httpx.MockTransport(FakeModel("x [S1]").handler)))
+    return TestClient(create_app(s, retrieval=LocalRetrieval(stub), generator=generator, keys=_tenant_keys()))
+
+
+def test_readyz_is_503_and_names_the_cause_when_retrieval_cannot_serve(caplog):
+    reason = "vector index holds no vectors for the 25 active versions"
+    with caplog.at_level("ERROR", logger="askiisc.serving"), _local_app(_StubRetriever(ready=(False, reason))) as c:
+        anon = c.get("/readyz")
+        assert anon.status_code == 503 and anon.json()["retrieval"] is False and reason not in anon.text
+        operator = c.get("/readyz", headers={"Authorization": f"Bearer {ADMIN}"}).json()
+        assert operator["retrieval_reason"] == reason                     # operators see why
+    assert reason in caplog.text                                          # and the log says why
+
+
+def test_embedder_mismatch_is_a_logged_permanent_error_not_a_retry(caplog):
+    from askiisc_retrieval.retriever import EmbeddingModelMismatch
+    cause = "query embedder 'sentence-transformers/all-MiniLM-L6-v2' != snapshot model 'BAAI/bge-small-en-v1.5'"
+    stub = _StubRetriever(ready=(False, "embedding model mismatch: " + cause), error=EmbeddingModelMismatch(cause))
+    with caplog.at_level("ERROR", logger="askiisc.serving"), _local_app(stub) as c:
+        r = c.post("/v1/ask", json={"question": "Who teaches DS 252?"}, headers={"Authorization": f"Bearer {GUEST}"})
+        assert c.get("/readyz").status_code == 503
+    assert r.status_code == 503 and "misconfigured" in r.json()["error"]
+    assert "retry_after_s" not in r.json() and "retry-after" not in r.headers  # retrying cannot help
+    assert cause in caplog.text                                           # the cause is in the gateway log
+
+
+def test_temporary_retrieval_failure_still_asks_the_client_to_retry():
+    with _local_app(_StubRetriever(error=TimeoutError("store timed out"))) as c:
+        r = c.post("/v1/ask", json={"question": "Who teaches DS 252?"}, headers={"Authorization": f"Bearer {GUEST}"})
+    assert r.status_code == 503 and r.json()["retry_after_s"] == 5

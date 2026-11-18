@@ -244,6 +244,14 @@ class QdrantStore:
     def count(self) -> int:
         return self.c.count(self.col).count
 
+    def count_versions(self, version_ids) -> int:
+        """Vectors stored for the given (active) versions; 0 if the collection is missing or empty."""
+        if not self.c.collection_exists(self.col):
+            return 0
+        flt = self.m.Filter(must=[self.m.FieldCondition(key="version_id",
+                                                         match=self.m.MatchAny(any=sorted(version_ids)))])
+        return self.c.count(self.col, count_filter=flt, exact=True).count
+
     def close(self):
         self.c.close()
 

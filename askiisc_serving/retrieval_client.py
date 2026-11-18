@@ -37,6 +37,10 @@ class RetrievalUnavailable(Exception):
     pass
 
 
+class RetrievalMisconfigured(RetrievalUnavailable):
+    """A permanent configuration error (e.g. the query embedder does not match the index): retrying cannot help."""
+
+
 def academic_year(term: str | None) -> str | None:
     """IISc academic year runs Aug-Jul: 2026-AUG, 2027-JAN, 2027-SUM -> '2026-2027'."""
     m = TERM_RE.match(term or "")
@@ -160,6 +164,9 @@ class LocalRetrieval:
         try:
             res = await asyncio.to_thread(self.r.retrieve, question, list(scopes), mode == "full", True)
         except Exception as e:
+            from askiisc_retrieval.retriever import EmbeddingModelMismatch
+            if isinstance(e, EmbeddingModelMismatch):
+                raise RetrievalMisconfigured(f"{type(e).__name__}: {e}") from e
             raise RetrievalUnavailable(f"{type(e).__name__}: {e}") from e
         d = result_to_dict(res)
         if pinned and d["snapshot_id"] != pinned:
@@ -171,11 +178,12 @@ class LocalRetrieval:
         return chunk_source(self.r, chunk_id, scopes)
 
     async def ready(self) -> bool:
+        """Ready only if retrieval can serve evidence (#45); the reason for "not ready" is kept for operators."""
         try:
-            await asyncio.to_thread(self.snapshot_id)
-            return True
-        except Exception:
-            return False
+            ok, self.not_ready_reason = await asyncio.to_thread(self.r.readiness)
+        except Exception as exc:
+            ok, self.not_ready_reason = False, f"{type(exc).__name__}: {exc}"
+        return ok
 
 
 class RemoteRetrieval:

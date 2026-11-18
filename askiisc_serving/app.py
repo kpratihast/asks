@@ -37,7 +37,7 @@ from .generator import (ABSTAIN, GenerationUnavailable, Generator, citations_for
                         strip_abstention_boilerplate, verify, verify_connected)
 from .conversation import HELP_REPLY, guidance_reason, context_question, valid_rewrite
 from .metrics import Metrics
-from .retrieval_client import MODES, RetrievalUnavailable, SnapshotMismatch
+from .retrieval_client import MODES, RetrievalMisconfigured, RetrievalUnavailable, SnapshotMismatch
 from .settings import Settings
 from .security import RequestGuard, instruction_attack, evidence_instruction_attack, audit_evidence, knowledge_override
 
@@ -140,6 +140,11 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                 await identify()
             except Exception:                    # identity is metadata; never block startup on it
                 pass
+        readiness = getattr(getattr(st.retrieval, "r", None), "readiness", None)
+        if readiness is not None:
+            ok, reason = await asyncio.to_thread(readiness)
+            if not ok:              # start anyway (liveness, /readyz 503) but say why retrieval cannot answer
+                logging.getLogger("askiisc.serving").error("Retrieval not ready at startup: %s", reason)
         logging.getLogger("askiisc.serving").warning(
             "Ready: model %s at %s | tenants %s | try http://<host>:<port>/docs",
             s.served_model, s.vllm_url, sorted(st.keys.tenants))
@@ -352,6 +357,12 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         except SnapshotMismatch:
             app.state.metrics.reject(409, "snapshot_mismatch", p.tenant)
             return _error(409, "The requested snapshot is no longer active.")
+        except RetrievalMisconfigured as exc:
+            # Permanent: log the cause for operators, and do not tell clients to retry (#45).
+            logging.getLogger("askiisc.serving").error("Retrieval misconfigured: %s", exc)
+            app.state.metrics.reject(503, "retrieval_misconfigured", p.tenant)
+            return _error(503, "Retrieval is misconfigured on this server and cannot answer until an operator "
+                               "fixes it.")
         except RetrievalUnavailable:
             app.state.metrics.reject(503, "retrieval_unavailable", p.tenant)
             return _error(503, "Retrieval is temporarily unavailable. Please try again later.", retry_after_s=5)
@@ -478,7 +489,10 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                         r_ok, g_ok = await asyncio.gather(app.state.retrieval.ready(), app.state.generator.ready())
                 except Exception:
                     r_ok = g_ok = False
-                ready_cache.update(until=time.monotonic()+5, retrieval=r_ok, model=g_ok)
+                reason = getattr(app.state.retrieval, "not_ready_reason", None) if not r_ok else None
+                if reason and reason != ready_cache.get("reason"):
+                    logging.getLogger("askiisc.serving").error("Retrieval not ready: %s", reason)
+                ready_cache.update(until=time.monotonic()+5, retrieval=r_ok, model=g_ok, reason=reason)
         r_ok, g_ok = ready_cache['retrieval'], ready_cache['model']
         graph_status = getattr(app.state.retrieval, "graph_status", None)
         graph = graph_status() if graph_status is not None else {"available": True, "reason": None}
@@ -488,6 +502,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         if await operator(authorization, request):
             body.update({"admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared",
                          "model_info": getattr(app.state.generator, "identity", None),
+                         "retrieval_reason": ready_cache.get("reason"),
                          "graph": graph})          # degraded (vector-only) but still ready
         return JSONResponse(body, status_code=200 if (r_ok and g_ok) else 503)
 
