@@ -103,8 +103,16 @@ Errors: 401 no/invalid key, 422 bad request, 429 over limit (`Retry-After` heade
 
 ### Streaming (`"stream": true`, Server-Sent Events)
 `event: meta` (citation metadata for [S1].., budget, snapshot) -> `event: token` (`{"t": "..."}`) ...
--> `event: done` (the same object as the JSON response). If `done.status` is `fallback` with
-`replace_streamed_text: true`, the client must replace the streamed text with the excerpts.
+-> `event: done` (the same object as the JSON response).
+
+Tokens are sent while the model is still generating (FR-12), one whole sentence or list item at a time:
+a sentence is sent once it carries a valid [S#] marker and its names and numbers are found in the cited
+passage (the same claim check as the final answer). Refusal phrases, stated counts, e-mail addresses and
+URLs are held back until generation ends. The whole-answer checks run on `done`; if they reject or change
+text that was already sent, `done` carries `replace_streamed_text: true` and the client must replace the
+streamed text with `done.answer` (or the excerpts when `answer` is null). The bundled UI always shows
+`done.answer`. `trace.timings_ms.ttft_ms` is the model's own TTFT; measure client TTFT (NFR-5) with
+`python tools/eval_e2e.py --stream`, which records `client_ttft_ms` and `client_total_ms`.
 Streaming does not regenerate; the JSON path regenerates once when citations are invalid.
 
 ### Others
@@ -157,8 +165,9 @@ column against `expected_answer`.
 - On the 120-question set, retrieval alone would answer 3 of the 20 must-refuse questions (topic pages
   without the exact fact). The prompt rule 3 and the model's abstention must catch them: measure
   abstention end to end, never on retrieval alone.
-- Streaming buffers text until citation checks pass. A failed check is signalled in `done` and the client
-  must replace the text.
+- Streaming sends text one checked sentence at a time (a valid marker and the claim-support check per
+  sentence); refusals, counts, e-mail addresses and URLs wait for the end. If the whole-answer checks then
+  reject or change sent text, `done` carries `replace_streamed_text: true` and the client must replace it.
 - One process, models loaded once; scale by running more processes behind the gateway.
 - Kubernetes manifests are not included yet (PRD lists Kubernetes); the services run as plain processes or
   Docker containers.
@@ -168,4 +177,4 @@ Anonymous chat requires PUBLIC_CHAT=1. Key-file deployments reject missing or in
 
 Set AUTH_PUBLIC_ORIGIN for public HTTPS, or ALLOWED_HOSTS for a custom development host. Defaults permit loopback and the test client.
 
-SSE emits source metadata first and buffers answer text until validation finishes. Model ttft_ms measures the upstream provider. Measure browser-visible first-answer latency at the client. Buffered delivery is the security decision tracked in issue #26.
+SSE emits source metadata first, then each answer sentence once it has passed the per-sentence checks (issue #26). Model ttft_ms measures the upstream provider; measure client-visible time to first token with `tools/eval_e2e.py --stream` (`client_ttft_ms`).

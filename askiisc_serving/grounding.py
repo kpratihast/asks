@@ -221,3 +221,36 @@ def ground(answer: str, selected: list[dict], abstain_text: str, question: str =
         # The direct answer is not in the evidence: refuse rather than present the remaining padding.
         return abstain_text, {"unsupported_claims": failed, "refusal_reason": "unsupported_claims"}
     return kept, {"unsupported_claims": failed}
+
+
+# ------------------------------------------------------------------------------ incremental release (FR-12)
+_BOUNDARY = re.compile(r"(?<=[.!?])[ \t]+(?=\S)|\n+")
+_HOLD = re.compile(r"@|https?://|www\.", re.I)
+
+
+def safe_release_end(text: str, released: int, selected: list[dict], question: str = "") -> int:
+    """How much of the partial completion `text` may already be sent to the client (FR-12 streaming).
+
+    Only whole sentences or list items are released, and only when the text since `released`
+      * carries at least one valid [S#] marker and every claim in it is supported by the passages it cites
+        (the same lexical check the final answer gets),
+      * contains no e-mail address or URL (those are checked against the passages at the end),
+      * does not state a count ("three types:"; the list that follows is checked at the end), and
+      * the answer so far contains no refusal phrase (a refusal makes the whole answer a refusal).
+    Whole-answer checks (refusal after facts, count versus list, marker validity, departments) still run at
+    the end; if they fail the caller sends `replace_streamed_text: true`. Returns the new end offset
+    (>= `released`)."""
+    if refusal_position(text) is not None:
+        return released
+    valid = {h["prompt_marker"] for h in selected}
+    ends = [m.start() for m in _BOUNDARY.finditer(text, released)]
+    for end in reversed(ends):
+        chunk = text[released:end]
+        if not chunk.strip() or _HOLD.search(chunk) or _COUNTED.search(chunk):
+            continue
+        if not any(m in valid for m in MARKER_RE.findall(chunk)):
+            continue
+        if unsupported_claims(chunk, selected, question):
+            return released               # a failing sentence blocks everything after it
+        return end
+    return released

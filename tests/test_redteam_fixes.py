@@ -15,6 +15,7 @@ Second batch (#9-#17):
 #15 FR-4 a failed rebuild keeps the previous snapshot; atomic writes; graph matched to snapshot
 #16 the programme filter is applied and reported
 #17 the CSP hash matches the served bytes on any locale
+#26 FR-12 tokens stream sentence by sentence (each sentence claim-checked) before generation ends
 """
 import json
 import time
@@ -35,7 +36,7 @@ from askiisc_serving.generator import ABSTAIN, Generator
 from askiisc_serving.grounding import ground, refusal_position, unsupported_claims
 from askiisc_serving.security import knowledge_override
 from askiisc_serving.settings import Settings
-from test_serving import GUEST, H, HIT, KEYS, FakeModel, FakeRetrieval, make
+from test_serving import GUEST, H, HIT, KEYS, FakeModel, FakeRetrieval, ask, make
 
 
 def _done(response, stream):
@@ -845,3 +846,136 @@ def test_docs_quote_the_abstention_text_the_gateway_returns():
         text = (root / name).read_text(encoding="utf-8")
         assert ABSTAIN in text, name
         assert "could not find this in the CDS pages" not in text, name
+
+
+# ---------------------------------------------------------------------------------- #26 FR-12 streaming
+import asyncio
+
+from askiisc_serving.grounding import safe_release_end
+
+_S1 = [{"prompt_marker": "S1", "title": "Course Schedule",
+        "text": "Course ID: DS 252; Credits: 3:1; Instructor: Yogesh Simmhan"}]
+
+
+def _released(full, question="Who teaches DS 252?"):
+    """Feed `full` one character at a time (as tokens arrive); return [(chars received, text released)]."""
+    out, released = [], 0
+    for i in range(1, len(full) + 1):
+        buf = full[:i]
+        start = max(released, len(buf) - len(buf.lstrip()))
+        end = safe_release_end(buf, start, _S1, question)
+        if end > start:
+            out.append((i, buf[start:end]))
+            released = end
+    return out
+
+
+def test_first_sentence_is_released_before_the_rest_is_generated():
+    full = "DS 252 is taught by Yogesh Simmhan [S1]. The instructor is Yogesh Simmhan [S1]. "
+    got = _released(full)
+    assert got and got[0][1] == "DS 252 is taught by Yogesh Simmhan [S1]."
+    assert got[0][0] < len(full) * 0.6                     # sent while the model is still writing
+
+
+@pytest.mark.parametrize("text", [
+    "DS 252 is taught by Yogesh Simmhan. The room is fixed. ",                      # no marker: nothing to check against
+    "CDS also covers Natural Language Processing [S1]. Done [S1]. ",                  # invented term
+    "I could not find it in the sources. DS 252 is taught by Yogesh Simmhan [S1]. ",  # refusal first
+    "CDS offers three types of degrees [S1]:\n- MTech [S1]\n- PhD [S1]\n",           # count: held for the end
+    "Write to yogesh@iisc.ac.in [S1]. Thanks [S1]. ",                                # e-mail: checked at the end
+])
+def test_unsafe_text_is_never_released_early(text):
+    assert _released(text) == []
+
+
+def test_a_failing_sentence_blocks_everything_after_it():
+    text = "CDS also covers Natural Language Processing [S1]. DS 252 is taught by Yogesh Simmhan [S1]. Done. "
+    assert _released(text) == []
+
+
+def _events(response):
+    return [(b.split("\n")[0][7:], json.loads(b.split("\n")[1][6:])) for b in response.text.strip().split("\n\n")]
+
+
+@pytest.mark.parametrize("answer, status, replace", [
+    ("DS 252 is taught by Yogesh Simmhan [S1]. The instructor is Yogesh Simmhan [S1].", "answered", False),
+    # an unsupported later sentence is never sent, so the final answer equals the streamed text
+    ("DS 252 is taught by Yogesh Simmhan [S1]. CDS also covers Natural Language Processing [S1].", "answered", False),
+    # a refusal after facts: the first sentence was already sent, so the client is told to replace it
+    ("DS 252 is taught by Yogesh Simmhan [S1]. I could not find the room in the available IISc sources.",
+     "fallback", True),
+])
+def test_stream_events_match_the_final_answer(answer, status, replace):
+    c, _ = make(FakeModel(answer), regenerate_on_bad_citations=False)
+    with c:
+        events = _events(ask(c, stream=True))
+    done = events[-1][1]
+    text = "".join(d["t"] for e, d in events if e == "token").strip()
+    assert events[0][0] == "meta" and events[-1][0] == "done"
+    assert done["status"] == status and bool(done.get("replace_streamed_text")) is replace
+    if status == "answered":
+        assert text == done["answer"]
+
+
+def test_tokens_reach_the_client_before_generation_finishes():
+    """The model writes slowly; the first token event must be sent before its last chunk is produced."""
+    log = []
+    answer = "DS 252 is taught by Yogesh Simmhan [S1]. The instructor is Yogesh Simmhan [S1]. Credits are 3:1 [S1]."
+
+    async def body():
+        for i, word in enumerate(answer.split(" ")):
+            log.append(("model", i))
+            yield ("data: " + json.dumps({"choices": [{"delta": {"content": word + " "}, "finish_reason": None}]})
+                   + "\n\n").encode()
+            await asyncio.sleep(0.02)
+        log.append(("model", "end"))       # recorded before the last chunk: the client stops reading at [DONE]
+        yield b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
+
+    async def handler(request):
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "test-model"}]})
+        return httpx.Response(200, content=body(), headers={"content-type": "text/event-stream"})
+
+    s = Settings(vllm_url="http://model", served_model="test-model")
+    gen = Generator(s, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    app = create_app(s, retrieval=FakeRetrieval(), generator=gen, keys=KEYS)
+
+    async def run():
+        sent = asyncio.Event()
+        payload = json.dumps({"question": "Who teaches DS 252?", "stream": True}).encode()
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+                 "path": "/v1/ask", "raw_path": b"/v1/ask", "query_string": b"", "scheme": "http",
+                 "headers": [(b"host", b"testserver"), (b"content-type", b"application/json"),
+                             (b"content-length", str(len(payload)).encode()),
+                             (b"authorization", f"Bearer {GUEST}".encode())],
+                 "client": ("127.0.0.1", 1), "server": ("testserver", 80)}
+        status = {}
+        state = {"first": True}
+
+        async def receive():
+            if state["first"]:
+                state["first"] = False
+                return {"type": "http.request", "body": payload, "more_body": False}
+            await asyncio.Event().wait()                     # no client disconnect
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+            if message["type"] == "http.response.body":
+                for block in message.get("body", b"").decode().split("\n\n"):
+                    if block.startswith("event: token"):
+                        log.append(("client", "token"))
+                    elif block.startswith("event: done"):
+                        log.append(("client", "done"))
+                if not message.get("more_body", False):       # response finished (stream or error)
+                    sent.set()
+
+        async with app.router.lifespan_context(app):
+            task = asyncio.create_task(app(scope, receive, send))
+            await asyncio.wait_for(sent.wait(), 20)
+            task.cancel()
+        assert status.get("code") == 200, status
+
+    asyncio.run(run())
+    first_token = log.index(("client", "token"))
+    assert first_token < log.index(("model", "end"))

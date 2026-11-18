@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import asyncio
 import os
 import time
@@ -29,7 +30,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .admission import Admission, Rejected
 from .auth import KeyStore, Principal, Scope
-from .grounding import ground
+from .grounding import ground, safe_release_end
 from .email_auth import EmailAuth, AuthConfig, AuthError, COOKIE
 from askiisc_retrieval.private_documents import DocumentCatalog
 from .generator import (ABSTAIN, GenerationUnavailable, Generator, citations_for, excerpt_fallback,
@@ -617,25 +618,41 @@ def _sse_single(payload: dict):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-async def _stream(app, q, messages, selected, budget, hits, trace, timings, finish):
-    """SSE metadata first; answer tokens are released only after citation validation.
+def _pieces(text: str):
+    return re.findall(r"\S+\s*|\s+", text)
 
-    Removing a draft in the UI cannot retract bytes already sent to an attacker.
-    The bounded model completion is therefore buffered server-side. No regeneration.
+
+async def _stream(app, q, messages, selected, budget, hits, trace, timings, finish):
+    """SSE metadata first, then answer text as the model produces it (FR-12).
+
+    Text is sent a whole sentence or list item at a time, and only once that sentence cites a source and
+    passes the claim-support check (grounding.safe_release_end). Refusals, counts, e-mail addresses and URLs
+    are held back. The whole-answer checks still run when generation ends; if they change or reject what was
+    already sent, `done` carries `replace_streamed_text: true` and the client must replace the text.
+    The completion is bounded and never regenerated on this path.
     """
     parts, meta = [], {}
+    buffer, released = "", 0
     yield _sse("meta", {"citations": citations_for(selected), "budget": budget,
                         "snapshot_id": trace.get("snapshot_id"), "mode": q.mode})
     try:
         async for kind, v in app.state.generator.stream(messages):
             if kind == "token":
                 parts.append(v)
+                if q.mode != "none":
+                    buffer += v
+                    start = max(released, len(buffer) - len(buffer.lstrip()))
+                    end = safe_release_end(buffer, start, selected, q.question)
+                    if end > start:
+                        for piece in _pieces(buffer[start:end]):
+                            yield _sse("token", {"t": piece})
+                        released = end
             else:
                 meta = v
     except GenerationUnavailable as e:
         yield _sse("done", finish({"status": "fallback", "reason": "generation_unavailable", "detail": "The model is temporarily unavailable.",
                                    "answer": None, "excerpts": excerpt_fallback(hits), "citations": [],
-                                   "budget": budget, "replace_streamed_text": True}))
+                                   "budget": budget, "replace_streamed_text": bool(released)}))
         return
     answer = "".join(parts).strip()
     if q.mode != "none":
@@ -656,7 +673,15 @@ async def _stream(app, q, messages, selected, budget, hits, trace, timings, fini
     else:
         payload = {"status": "answered", "answer": answer, "citations": citations_for(selected, check["used"]),
                    "grounded": True, **base}
-    if payload['status'] == 'answered':
-        for word in answer.split(' '):
-            yield _sse('token', {'t': word+' '})
+    sent = buffer[:released].strip()
+    if payload["status"] == "answered":
+        if sent and not answer.startswith(sent):
+            payload["replace_streamed_text"] = True          # the final text differs from what was streamed
+            for piece in _pieces(answer):
+                yield _sse("token", {"t": piece})
+        else:
+            for piece in _pieces(answer[len(sent):] if sent else answer):
+                yield _sse("token", {"t": piece})
+    elif sent:
+        payload["replace_streamed_text"] = True
     yield _sse("done", finish(payload))

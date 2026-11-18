@@ -21,7 +21,7 @@ Important limits
 - #21 and #22 still require the freshness scheduler and immutable raw-version implementation.
 - #3 and #4 remain partial because lexical overlap cannot demonstrate zero unsupported semantic claims or a 100% live-model refusal invariant.
 - #15 still needs concurrent-writer and cross-store activation work.
-- #26 retains buffered release for security. An earlier token cannot be retracted after disclosure.
+- #26 streams one checked sentence at a time; only text that passed the per-sentence claim check is sent before the whole-answer checks.
 - #44 needs measured E4/E6, stale-version, GPU-hour and cost results. Historical report figures have not been replaced with invented results.
 
 Changes requiring review
@@ -51,7 +51,7 @@ The strict local launcher can create a private guest key. The example local prof
 | [#21](https://github.com/kpratihast/asks/issues/21) | Remaining, high priority | Add conditional source checks, a bounded 24-hour scheduler and a maintainer trigger. No scheduler has been installed or claimed in this batch. |
 | [#22](https://github.com/kpratihast/asks/issues/22) | Remaining, high priority | Add immutable raw-source history, content-hash no-op handling and refresh of crawled sources. Existing raw-cache overwrite behavior still needs replacement. |
 | [#24](https://github.com/kpratihast/asks/issues/24) | Implemented | Hostnames default to a loopback/test allowlist, with AUTH_PUBLIC_ORIGIN or ALLOWED_HOSTS for configured hosts. Foreign hosts cannot control redirect locations. |
-| [#26](https://github.com/kpratihast/asks/issues/26) | Intentional security tradeoff; acceptance unresolved | Preserved validation before answer release. Documentation distinguishes upstream TTFT from client-visible latency. Incremental safe streaming or a PRD amendment still needs a decision. |
+| [#26](https://github.com/kpratihast/asks/issues/26) | Implemented | Incremental safe streaming: each sentence is released once it has a valid marker and passes the claim-support check; refusals, counts, e-mail addresses and URLs wait for the whole-answer checks, which can set `replace_streamed_text`. `tools/eval_e2e.py --stream` records client-side TTFT for NFR-5. |
 | [#27](https://github.com/kpratihast/asks/issues/27) | Source fixed; rotation pending | Compose reads NEO4J_PASSWORD from a private environment. Existing credentials and historical repository exposure require operator rotation. History has not been rewritten. |
 | [#28](https://github.com/kpratihast/asks/issues/28) | Implemented | Both deployment and CI locks use Soup Sieve 4.1 with official PyPI hashes. Tests ran with that version in an isolated dependency directory. |
 | [#30](https://github.com/kpratihast/asks/issues/30) | Docs/profile fixed | Local instructions explain copying the example profile, model discovery, one default directory and explicit directory overrides, and --port. |
@@ -63,7 +63,7 @@ The strict local launcher can create a private guest key. The example local prof
 | [#36](https://github.com/kpratihast/asks/issues/36) | Implemented | Whitespace is normalized before term matching. A 100,000-space regression completes within its bound. |
 | [#37](https://github.com/kpratihast/asks/issues/37) | Implemented | Malformed terms have an invalid sort sentinel and are excluded from passage selection/auditing. |
 | [#38](https://github.com/kpratihast/asks/issues/38) | Implemented | Oversized fixed prompts and oversized rebuilt blocks are rejected. Final assembled messages are checked against the configured token counter. Empty evidence does not reach generation. |
-| [#39](https://github.com/kpratihast/asks/issues/39) | Docs fixed | Corrected the refusal sentence and documented validation-buffered delivery. |
+| [#39](https://github.com/kpratihast/asks/issues/39) | Docs fixed | Corrected the refusal sentence and documented SSE delivery (see #26 for incremental release). |
 | [#41](https://github.com/kpratihast/asks/issues/41) | Implemented | Empty logout requests work without Content-Length and with chunked framing. Nonempty non-JSON bodies still fail. |
 | [#42](https://github.com/kpratihast/asks/issues/42) | Implemented | Non-rate admission failure/cancellation refunds the taken rate token. Queue-full retry and concurrency regressions pass. |
 | [#43](https://github.com/kpratihast/asks/issues/43) | Implemented | B0 requires both an explicit ALLOW_NO_RETRIEVAL flag and an admin bearer key. Guest credentials remain denied. |

@@ -1,4 +1,4 @@
-"""Replay the red-team scenarios (issues #2-#17) against one checkout and print what happens.
+"""Replay the red-team scenarios (issues #2-#17, #26) against one checkout and print what happens.
 
     python tools/repro_redteam.py .                 # this checkout
     git worktree add ../asks-baseline rt-baseline
@@ -309,6 +309,70 @@ def _():
         return f"refused at load time: {str(e)[:90]}"
     admin = store.lookup("Bearer REPLACE-with-a-random-key-admin-00000001")
     return f"loaded {len(store.tenants)} tenants; placeholder admin key accepted={admin is not None} (role={admin.role if admin else None})"
+
+@case("#26 FR-12 streaming: first token before generation ends")
+def _():
+    """Slow model: 0.1 s per word. Client-side time of every SSE event, measured in-process over ASGI."""
+    from askiisc_serving.app import create_app
+    from askiisc_serving.generator import Generator
+    from test_serving import FakeRetrieval, GUEST
+    answer = "DS 252 is taught by Yogesh Simmhan [S1]. The instructor is Yogesh Simmhan [S1]. Credits are 3:1 [S1]."
+    words = answer.split(" ")
+
+    async def body():
+        for w in words:
+            yield ("data: " + json.dumps({"choices": [{"delta": {"content": w + " "}, "finish_reason": None}]}) + "\n\n").encode()
+            await asyncio.sleep(0.1)
+        yield b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
+
+    async def handler(request):
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "test-model"}]})
+        return httpx.Response(200, content=body(), headers={"content-type": "text/event-stream"})
+
+    s = Settings(vllm_url="http://model", served_model="test-model")
+    app = create_app(s, retrieval=FakeRetrieval(), generator=Generator(s, client=httpx.AsyncClient(
+        transport=httpx.MockTransport(handler))), keys=KEYS)
+    seen = []
+
+    async def run():
+        finished, first = asyncio.Event(), {"x": True}
+        payload = json.dumps({"question": "Who teaches DS 252?", "stream": True}).encode()
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "path": "/v1/ask",
+                 "raw_path": b"/v1/ask", "query_string": b"", "scheme": "http", "client": ("127.0.0.1", 1),
+                 "server": ("testserver", 80), "headers": [(b"host", b"testserver"), (b"content-type", b"application/json"),
+                                                           (b"content-length", str(len(payload)).encode()),
+                                                           (b"authorization", f"Bearer {GUEST}".encode())]}
+
+        async def receive():
+            if first["x"]:
+                first["x"] = False
+                return {"type": "http.request", "body": payload, "more_body": False}
+            await asyncio.Event().wait()
+
+        async def send(m):
+            if m["type"] == "http.response.start" and m["status"] != 200:
+                seen.append((time.perf_counter() - t0, f"HTTP {m['status']}"))
+            if m["type"] == "http.response.body":
+                for block in m.get("body", b"").decode().split("\n\n"):
+                    if block.startswith("event:"):
+                        seen.append((time.perf_counter() - t0, block.split("\n")[0][7:]))
+                if not m.get("more_body", False):
+                    finished.set()
+        t0 = time.perf_counter()
+        async with app.router.lifespan_context(app):
+            task = asyncio.create_task(app(scope, receive, send))
+            await asyncio.wait_for(finished.wait(), 30)
+            task.cancel()
+
+    asyncio.run(run())
+    if not any(e == "token" for _, e in seen):
+        return f"no token events: {[e for _, e in seen]}"
+    tok = [t for t, e in seen if e == "token"]
+    done_t = [t for t, e in seen if e == "done"][0]
+    gen = 0.1 * len(words)
+    return (f"generation ~{gen:.1f}s; first token at {tok[0]:.2f}s, last token {tok[-1]:.2f}s, done {done_t:.2f}s "
+            f"({len(tok)} token events) -> {'tokens before generation ends' if tok[0] < gen - 0.3 else 'BUFFERED until the end'}")
 
 for k in sorted(RESULTS, key=lambda s: (not s.startswith("#"), int(s.split()[0][1:]) if s.startswith("#") else 0, s)):
     print(f"{k:<50} {RESULTS[k]}")
