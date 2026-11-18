@@ -1054,3 +1054,18 @@ def test_temporary_retrieval_failure_still_asks_the_client_to_retry():
     with _local_app(_StubRetriever(error=TimeoutError("store timed out"))) as c:
         r = c.post("/v1/ask", json={"question": "Who teaches DS 252?"}, headers={"Authorization": f"Bearer {GUEST}"})
     assert r.status_code == 503 and r.json()["retry_after_s"] == 5
+
+
+# --------------------------------------- #49 a valid address from a non-graph passage is accepted
+def test_verify_answer_accepts_a_cited_email_from_a_non_graph_passage():
+    from askiisc_serving.app import _verify_answer
+    selected = [
+        {"prompt_marker": "S1", "chunk_ids": ["c1"], "department": "CDS",
+         "text": "CDS office: office.cds@iisc.ac.in",
+         "graph_support": [{"proof_id": "p1", "contact_addresses": ["office.cds@iisc.ac.in"], "required_chunk_ids": ["c1"]}]},
+        {"prompt_marker": "S2", "chunk_ids": ["c2"], "department": "CDS",
+         "text": "Hostel office: hostel.office@iisc.ac.in", "graph_support": []},
+    ]
+    check = _verify_answer("Contact office.cds@iisc.ac.in [S1] and hostel.office@iisc.ac.in [S2].", selected, "full",
+                           {"departments": ["CDS"]})
+    assert not check.get("unsupported_email")

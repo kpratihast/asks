@@ -529,14 +529,10 @@ def _verify_answer(answer, selected, mode, trace):
     if mode != "none" and not check["abstained"]:
         from askiisc_retrieval.web_links import EMAIL
 
-        addresses = {address.casefold() for address in EMAIL.findall(answer)}
-        if addresses:
+        if EMAIL.search(answer):
+            from .grounding import unsupported_emails
             cited = [hit for hit in selected if hit["prompt_marker"] in check["used"]]
-            supported = {address.casefold() for hit in cited for address in EMAIL.findall(hit["text"])}
-            matched = {address.casefold() for hit in cited for support in hit.get("graph_support", [])
-                       for address in support.get("contact_addresses", [])}
-            missing = addresses - (supported & matched if matched else supported)
-            if missing:
+            if unsupported_emails(answer, cited):                 # per-address attribution (#49)
                 check.update(ok=False, unsupported_email=True)
     requested = set(trace.get("departments") or [])
     if len(requested) > 1 and not check["abstained"]:

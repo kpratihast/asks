@@ -254,3 +254,44 @@ def safe_release_end(text: str, released: int, selected: list[dict], question: s
             return released               # a failing sentence blocks everything after it
         return end
     return released
+
+
+# ------------------------------------------------------------------------------ e-mail attribution (#49)
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)|\n")
+
+
+def unsupported_emails(answer: str, cited: list[dict]) -> set[str]:
+    """E-mail addresses in `answer` that are not backed by the passages they are cited to.
+
+    Each address is checked against the citation markers that follow it (up to the next address or the
+    end of the sentence; if none follow, all cited passages). A graph-proved contact (a passage carrying
+    `contact_addresses`, or any passage the proof requires) only allows the proved addresses, so an answer
+    cannot attach another address from a cited directory page to the proved person. A passage outside any
+    contact proof allows the addresses in its own text. Before #49 one contact proof anywhere in the answer
+    restricted every address, so a correct address cited to an unrelated passage was rejected."""
+    from askiisc_retrieval.web_links import EMAIL
+    by_marker = {hit["prompt_marker"]: hit for hit in cited}
+    proofs = [s for hit in cited for s in hit.get("graph_support", []) or [] if s.get("contact_addresses")]
+    proved = {a.casefold() for s in proofs for a in s.get("contact_addresses", [])}
+    proof_chunks = {c for s in proofs for c in s.get("required_chunk_ids", [])}
+    cited_text = {a.casefold() for hit in cited for a in EMAIL.findall(hit.get("text", ""))}
+
+    def restricted(hit) -> bool:
+        return any(s.get("contact_addresses") for s in hit.get("graph_support", []) or []) \
+            or bool(set(hit.get("chunk_ids", [])) & proof_chunks)
+
+    def allowed(hits) -> set[str]:
+        if any(restricted(hit) for hit in hits):          # cited together with a contact proof: proved only
+            return proved & cited_text
+        return {a.casefold() for hit in hits for a in EMAIL.findall(hit.get("text", ""))}
+
+    matches = list(EMAIL.finditer(answer))
+    missing = set()
+    for i, m in enumerate(matches):
+        stop = matches[i + 1].start() if i + 1 < len(matches) else len(answer)
+        end = _SENTENCE_END.search(answer, m.end(), stop)
+        segment = answer[m.end():end.start() if end else stop]
+        hits = [by_marker[k] for k in MARKER_RE.findall(segment) if k in by_marker] or cited
+        if m.group(0).casefold() not in allowed(hits):
+            missing.add(m.group(0).casefold())
+    return missing
