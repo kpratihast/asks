@@ -133,7 +133,14 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         if st.generator is None:
             st.generator = Generator(s)
         if s.served_model == "auto":
-            await st.generator.discover()
+            try:
+                await st.generator.discover()
+            except Exception as exc:
+                # #48: the gateway still starts; /readyz reports the model as not ready and /v1/ask returns
+                # the excerpt fallback (FR-11) until the model is reachable, then discovers it on first use.
+                logging.getLogger("askiisc.serving").warning(
+                    "Model endpoint not reachable at startup (%s); serving excerpt fallbacks until it is.",
+                    type(exc).__name__)
         identify = getattr(st.generator, "identify", None)
         if identify is not None:
             try:

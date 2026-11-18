@@ -236,8 +236,26 @@ class Generator:
         except TimeoutError:
             raise GenerationUnavailable('Model completion timed out') from None
 
+    async def ensure_model(self) -> None:
+        """SERVED_MODEL=auto: resolve the served model on first use if it was down at startup (#48).
+        While the endpoint is unreachable this raises GenerationUnavailable, so answers take the excerpt
+        fallback (FR-11) instead of the gateway failing to start."""
+        if self.s.served_model != "auto":
+            return
+        try:
+            await self.discover()
+        except GenerationUnavailable:
+            raise
+        except Exception as e:
+            raise GenerationUnavailable(f"model endpoint unavailable: {type(e).__name__}") from e
+        try:
+            await self.identify()                     # FR-8 metadata for the model now being served
+        except Exception:
+            pass
+
     async def _stream(self, messages: list[dict]):
         """Yields ("token", text) for each piece, then ("usage", {...}) once at the end."""
+        await self.ensure_model()
         t0 = time.perf_counter()
         ttft, usage, finish, served_by = None, None, None, None
         try:
@@ -380,6 +398,7 @@ class Generator:
 
     async def ready(self) -> bool:
         try:
+            await self.ensure_model()
             r = await self.c.get(self.s.vllm_url.rstrip("/") + "/v1/models", headers=self._headers(), timeout=5)
             return r.status_code == 200 and any(
                 m.get("id") == self.s.served_model for m in r.json().get("data", []))

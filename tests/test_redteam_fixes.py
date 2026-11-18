@@ -1069,3 +1069,18 @@ def test_verify_answer_accepts_a_cited_email_from_a_non_graph_passage():
     check = _verify_answer("Contact office.cds@iisc.ac.in [S1] and hostel.office@iisc.ac.in [S2].", selected, "full",
                            {"departments": ["CDS"]})
     assert not check.get("unsupported_email")
+
+
+# --------------------------------------- #48 SERVED_MODEL=auto with the model down: the gateway still starts
+def test_gateway_starts_with_auto_model_while_the_endpoint_is_down():
+    def down(request):
+        raise httpx.ConnectError("connection refused", request=request)
+    s = Settings(served_model="auto", vllm_url="http://model")
+    generator = Generator(s, client=httpx.AsyncClient(transport=httpx.MockTransport(down)))
+    with TestClient(create_app(s, retrieval=FakeRetrieval(), generator=generator, keys=KEYS)) as c:   # no crash
+        assert c.get("/healthz").status_code == 200
+        assert c.get("/readyz").status_code == 503
+        r = c.post("/v1/ask", json={"question": "Who teaches DS 252 this semester?"},
+                   headers={"Authorization": f"Bearer {GUEST}"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "fallback" and r.json()["reason"] == "generation_unavailable"
