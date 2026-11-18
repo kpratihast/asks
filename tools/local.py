@@ -75,9 +75,8 @@ def ensure_guest_key(path: Path | None = None) -> Path | None:
 def prepare(refresh=False, rebuild=False):
     import httpx
     from askiisc_retrieval import config
-    from askiisc_retrieval.cli import make_embedder, make_store
+    from askiisc_retrieval.cli import make_embedder, safe_rebuild
     from askiisc_retrieval.fetch import UA, download_source, load_sources, raw_name
-    from askiisc_retrieval.ingest_stub import build_index
 
     if config.BACKEND != "stub" or config.QDRANT_URL:
         raise SystemExit("Local prepare requires ASKIISC_BACKEND=stub and QDRANT_URL unset. "
@@ -115,15 +114,10 @@ def prepare(refresh=False, rebuild=False):
     pages = load_page_inputs(include_fixtures=False)
     if (config.DATA / 'admissions' / 'sources.json').is_file():
         print('Admissions sources: using the verified cache. Use tools/import_admissions.py --fetch for a fresh bounded snapshot.')
-    emb = make_embedder()
-    store = make_store(reset=False)
-    try:
-        if store.count():
-            # Acquire Qdrant's local lock before replacing anything; a running server owns it.
-            store.reset()
-        report = build_index(pages, emb, store, config.GRAPH_PATH, config.SNAPSHOT_PATH, config.CHUNKS_PATH)
-    finally:
-        store.close()
+    # FR-4: the same safe rebuild as `cli ingest` - the live index is never emptied first, so a failed or
+    # killed rebuild keeps serving the previous snapshot. (Opening the local store takes Qdrant's lock, so a
+    # running server still has to be stopped first.)
+    report = safe_rebuild(pages, make_embedder())
     print(json.dumps(report, indent=2))
 
 

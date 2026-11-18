@@ -6,6 +6,8 @@ The marker check in generator.verify proves that every [S#] exists. This module 
   after it are not presented as an answer.
 * A refusal phrase after facts ("... I could not find the fee") is a self-contradiction; the caller returns
   source excerpts instead of contradictory text.
+* A stated count followed by a list of a different length ("three types:" then six items) is also a
+  self-contradiction.
 * Every claim (sentence or list item) must be supported by the passages it cites: each number and each
   specific name or term in the claim must appear in those passages. Unsupported claims are removed. A claim
   without its own marker is checked against the markers of its paragraph, or else of the whole answer.
@@ -163,6 +165,38 @@ def remove_claims(answer: str, claims: list[str]) -> str:
     return kept.strip()
 
 
+_COUNT_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve".split())}
+_COUNTED = re.compile(
+    r"\b(" + "|".join(list(_COUNT_WORDS)[2:]) + r"|[2-9]|1[0-2])\s+(?:\w+\s+){0,2}?"
+    r"(?:types?|kinds?|programm?es?|programs?|degrees?|courses?|topics?|areas?|labs?|items?|options?|"
+    r"categories|category|ways?|steps?|streams?|tracks?|groups?|stages?|phases?|components?|requirements?)\b", re.I)
+
+
+def count_mismatch(answer: str) -> str | None:
+    """A stated count ("three types of degrees") followed by a list of a different length is a
+    self-contradiction. Returns a short description, or None."""
+    lines = MARKER_RE.sub("", answer).split("\n")
+    for i, line in enumerate(lines):
+        m = _COUNTED.search(line)
+        if not m:
+            continue
+        stated = m.group(1).lower()
+        stated = _COUNT_WORDS.get(stated, int(stated) if stated.isdigit() else None)
+        # the list must start within the next three lines (a lead-in may sit between)
+        j, items = i + 1, 0
+        while j < len(lines) and j <= i + 3 and not _LIST_PREFIX.match(lines[j]):
+            j += 1
+        while j < len(lines) and (_LIST_PREFIX.match(lines[j]) or not lines[j].strip()):
+            items += bool(_LIST_PREFIX.match(lines[j]))
+            if not lines[j].strip() and j + 1 < len(lines) and not _LIST_PREFIX.match(lines[j + 1]):
+                break
+            j += 1
+        if items and stated and items != stated:
+            return f"states {stated} but lists {items}"
+    return None
+
+
 def has_content(answer: str) -> bool:
     return bool(MARKER_RE.search(answer)) and any(c.isalnum() for c in MARKER_RE.sub("", answer))
 
@@ -174,6 +208,9 @@ def ground(answer: str, selected: list[dict], abstain_text: str, question: str =
         return abstain_text, {"refusal_reason": "model_abstained", "padding_removed": answer.strip() != abstain_text}
     if position == "later":
         return answer, {"self_contradiction": True}
+    mismatch = count_mismatch(answer)
+    if mismatch:
+        return answer, {"self_contradiction": True, "count_mismatch": mismatch}
     failed = unsupported_claims(answer, selected, question)
     if not failed:
         return answer, {"unsupported_claims": []}

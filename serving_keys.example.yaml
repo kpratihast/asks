@@ -1,5 +1,6 @@
-# Copy to serving_keys.yaml (keep it out of git) and replace the keys with long random strings, e.g.
-#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+# FORMAT REFERENCE ONLY. The keys below are public placeholders and the gateway refuses to load them.
+# Create a real key file with random keys instead:
+#   python tools/make_keys.py serving_keys.yaml        (git-ignored, readable only by you)
 # role -> what the key may see:
 #   guest   = public pages only
 #   student = public + student-only

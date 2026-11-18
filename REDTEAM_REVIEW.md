@@ -6,9 +6,15 @@ Reviewed all 38 open issues. Reused and reviewed the existing origin/fix/redteam
 
 Validation
 
-- 654 tests passed and 17 optional tests were skipped on the local Python 3.14 environment, using Soup Sieve 4.1 in an isolated temporary dependency directory.
+- After integrating `origin/fix/redteam-issues` through `923a634`, 660 tests passed and 17 optional tests were skipped on the local Python 3.14 environment, using Soup Sieve 4.1 in an isolated temporary dependency directory.
 - Shell syntax and whitespace checks passed. Python compilation passed. Soup Sieve 4.1 was installed with hash verification for testing. The full Linux production lock was not reinstalled on this Mac.
 - Tests use local fixtures and fake model/services. Live GPU/Metal execution, fresh model quality benchmarks, real SMTP delivery and AWS deployment are outside this validation run.
+
+Latest branch integration
+
+Integrated `fix/redteam-issues` through `923a634` into `fix/reported-issues-20261117`. Resolved six conflicted files, retaining the destination's stricter checks that question text is not evidence and its source-backed partial numeric answer handling. Added upstream list-count contradiction checks, key-generation tooling and a shared rebuild path for CLI ingestion and the local launcher. A subprocess regression confirms the old snapshot and vectors survive a rebuild killed during embedding. The 17 skipped tests require the separate pipeline checkout and database configuration.
+
+This integration was tested locally before the user authorized committing and pushing it. AWS deployment is outside this integration's scope. The earlier approval recorded below applies to the previously published batch.
 
 Important limits
 

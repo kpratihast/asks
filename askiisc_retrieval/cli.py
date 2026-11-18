@@ -94,16 +94,17 @@ def cmd_fetch(a):
     print(f"Raw pages are in {config.RAW_DIR}")
 
 
-def cmd_ingest(a):
-    from .ingest_stub import build_index, load_page_inputs
-    pages = load_page_inputs()
-    if not pages:
-        sys.exit("Nothing to ingest. Run `fetch` first.")
-    config.DATA.mkdir(exist_ok=True)
-    emb = make_embedder()
-    # FR-4: never empty the live store before a rebuild. New versions are added next to the old ones; the
-    # snapshot switches only after the build succeeds, and only then are versions it no longer uses removed.
-    # A failed rebuild leaves the previous snapshot, its vectors and its graph serving.
+def safe_rebuild(pages, emb) -> dict:
+    """Rebuild the index without ever emptying the live one (FR-4). Used by `cli ingest` and by the
+    launcher (`./run-local.sh --rebuild` / `tools/local.py`), so both refresh paths behave the same.
+
+    New versions are added next to the old ones; the snapshot switches only after the build succeeds,
+    and only then are versions it no longer uses removed. A failed or killed rebuild (crash, Ctrl-C,
+    out-of-memory kill) leaves the previous snapshot, its vectors and its graph serving. Extraction
+    failures are written to data/extraction_failures.json (FR-2)."""
+    from .ingest_stub import build_index
+    from .snapshot import atomic_write_text
+    config.DATA.mkdir(parents=True, exist_ok=True)
     store = make_store()
     size = store.vector_size()
     if size is not None and size != config.EMBED_DIM:
@@ -117,6 +118,17 @@ def cmd_ingest(a):
         store.prune(rep["built_versions"])
     finally:
         store.close()
+    atomic_write_text(config.DATA / "extraction_failures.json", json.dumps(rep.get("failures", []), indent=2))
+    return rep
+
+
+def cmd_ingest(a):
+    from .ingest_stub import load_page_inputs
+    pages = load_page_inputs()
+    if not pages:
+        sys.exit("Nothing to ingest. Run `fetch` first.")
+    config.DATA.mkdir(exist_ok=True)
+    rep = safe_rebuild(pages, make_embedder())
     print()
     for p in rep["pages"]:
         if "version_id" in p:
@@ -125,11 +137,8 @@ def cmd_ingest(a):
         else:
             print(f"  {p['status']}: {p['url']}")
     if rep.get("failures"):
-        failures_path = config.DATA / "extraction_failures.json"
-        from .snapshot import atomic_write_text
-        import json as _json
-        atomic_write_text(failures_path, _json.dumps(rep["failures"], indent=2))
-        print(f"\n!! {len(rep['failures'])} page(s) failed extraction and were not indexed (see {failures_path})")
+        print(f"\n!! {len(rep['failures'])} page(s) failed extraction and were not indexed "
+              f"(see {config.DATA / 'extraction_failures.json'})")
     if rep.get("template_removed"):
         parts = ", ".join(f"'{h}' x{n}" for h, n in sorted(rep["template_removed"].items(), key=lambda kv: -kv[1]))
         print(f"\nRemoved repeated site-template sections: {parts}")
