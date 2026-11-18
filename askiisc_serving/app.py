@@ -258,7 +258,10 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         response.delete_cookie(COOKIE, path="/", secure=auth.s.secure_cookie if auth else AuthConfig().secure_cookie, httponly=True, samesite="lax")
         return response
 
-    def access_gate(question, p):
+    def access_hint(question, p):
+        """Sign-in hint for a question about a restricted document the caller cannot read. It is returned
+        only when the caller's own evidence gave no verified answer (#46): retrieval enforces scopes for every
+        query, so public information is answered for every role, whatever the wording."""
         needed = app.state.documents.denied_scopes(question, p.scopes)
         if not needed:
             return None
@@ -310,9 +313,6 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             return _error(422, f"question longer than {s.max_question_chars} characters")
         previous_question = context_question(q.question, q.history)
         gate_question = " ".join(filter(None, [previous_question, q.question]))
-        denied = access_gate(gate_question, p)
-        if denied is not None:
-            return denied
         return await _while_connected(request, answer_request(q, request, p, previous_question, gate_question, t0))
 
     async def answer_request(q, request, p, previous_question, gate_question, t0):
@@ -338,6 +338,14 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             return _sse_single(payload) if q.stream else payload
 
         search_question = q.question
+        hint = None                                 # sign-in hint, used only if no verified answer (#46)
+
+        def respond(payload):
+            if (hint is not None and payload.get("status") != "answered"
+                    and payload.get("reason") != "generation_unavailable"):
+                return hint
+            return _sse_single(payload) if q.stream else payload
+
         rewrite_meta, rewrite_ms = {}, 0.0          # #50: the rewrite's tokens and time are reported separately
         try:
             if previous_question:
@@ -360,9 +368,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                     except GenerationUnavailable:
                         pass
                     rewrite_ms = round((time.perf_counter() - r0) * 1000, 1)
-            denied = access_gate(search_question, p)
-            if denied is not None:
-                return denied
+            hint = access_hint(gate_question, p) or access_hint(search_question, p)
             hits, trace = await app.state.retrieval.run(search_question, q.pinned_snapshot, q.mode, scope.programme,
                                                         scope.academic_year, scopes=scope.scopes)
         except SnapshotMismatch:
@@ -424,20 +430,19 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         if department_guidance:
             reason, answer = department_guidance
             payload = finish({"status": "guidance", "reason": reason, "answer": answer, "citations": []})
-            return _sse_single(payload) if q.stream else payload
+            return respond(payload)
         if q.mode != "none" and (not hits or trace.get("evidence_sufficient") is False):
             payload = finish({"status": "abstained", "reason": "insufficient_evidence", "answer": ABSTAIN,
                               "citations": [], "sources_that_may_help": excerpt_fallback(hits)})
-            return _sse_single(payload) if q.stream else payload
-        if not s.restricted_generation and (
-            any(hit["access_scope"] != "public" for hit in hits) or app.state.documents.matching(gate_question)
-            or app.state.documents.matching(search_question)
-        ):
+            return respond(payload)
+        # Only non-public evidence is kept off an untrusted model endpoint; a question's wording alone does
+        # not stop public evidence from being answered (#46).
+        if not s.restricted_generation and any(hit["access_scope"] != "public" for hit in hits):
             payload = finish({"status": "fallback", "reason": "restricted_model_endpoint",
                               "answer": "Restricted information stays on a trusted model endpoint. "
                                         "You can read the sources you have access to below.",
                               "citations": [], "excerpts": excerpt_fallback(hits)})
-            return _sse_single(payload) if q.stream else payload
+            return respond(payload)
 
         t1 = time.perf_counter()
         messages, selected, budget = app.state.generator.prepare(
@@ -450,13 +455,15 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
             payload = finish({"status": "abstained", "reason": "insufficient_context_budget",
                               "answer": ABSTAIN, "citations": [], "budget": budget,
                               "sources_that_may_help": excerpt_fallback(hits)})
-            return _sse_single(payload) if q.stream else payload
+            return respond(payload)
 
-        if q.stream:
+        if q.stream and hint is None:
             return StreamingResponse(_stream(app, q, messages, selected, budget, hits, trace, timings, finish),
                                      media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-        return await _answer(app, q, messages, selected, budget, hits, timings, finish, trace)
+        # A question that names a restricted document is answered when the caller's evidence answers it,
+        # and gets the sign-in hint otherwise; it is not streamed, so a hint can replace a refusal (#46).
+        return respond(await _answer(app, q, messages, selected, budget, hits, timings, finish, trace))
 
     # ------------------------------------------------------------------ other endpoints
     @app.get("/v1/sources/{chunk_id}")

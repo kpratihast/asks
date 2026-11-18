@@ -39,13 +39,16 @@ def test_independent_question_ignores_old_private_topic_and_assistant_instructio
 
 
 def test_hello_after_private_question_does_not_prompt_login_but_real_follow_up_does():
-    model = FakeModel('should never be called')
+    model = FakeModel(ABSTAIN)
     c, retrieval = make(model)
     history = [{'role':'user','content':'Show the final examination timetable'}]
     with c:
         assert ask(c, q='hello', history=history).json()['status'] == 'guidance'
-        assert ask(c, q='And what date?', history=history).status_code == 401
-    assert not model.requests and not retrieval.calls
+        assert not model.requests and not retrieval.calls
+        # The follow-up is searched in the guest's public evidence first (#46); it has no answer there,
+        # so the guest gets the sign-in prompt instead of a refusal.
+        response = ask(c, q='And what date?', history=history)
+        assert response.status_code == 401 and response.json()['login_required']
 
 
 @pytest.mark.parametrize('rewrite', ['What is DS 252 about?', '', 'The answer is Yogesh Simmhan.'])
