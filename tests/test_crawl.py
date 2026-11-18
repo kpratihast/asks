@@ -108,3 +108,36 @@ def test_fr1_html_disguised_as_pdf_is_not_stored(tmp_path, monkeypatch):
     pages = crawl_mod.crawl(["https://cds.iisc.ac.in/"], 2, 50, httpx.Client(transport=httpx.MockTransport(handler)),
                             raw_name, delay_s=0, log=lambda *a: None)
     assert [p["url"] for p in pages] == ["https://cds.iisc.ac.in/"]
+
+
+# ------------------------------------------------- #58 deeply nested tables parse in bounded time
+def _nested_tables(levels):
+    inner = "<p>DS 252 is taught by Yogesh Simmhan.</p>"
+    for i in range(levels):
+        inner = f"<table><tr><td>cell {i}</td><td>{inner}</td></tr></table>"
+    return f"<html><body><main><h1>Nested</h1>{inner}</main></body></html>"
+
+
+def test_deeply_nested_tables_parse_quickly_with_bounded_output():
+    """#58: 800 nested tables took minutes (each row re-read every nested table: cubic work, and the
+    extracted text grew to megabytes). Each table now reads only its own rows, nesting is capped."""
+    import time
+    from askiisc_retrieval.parse import MAX_TABLE_DEPTH, parse_html
+    for levels in (800, 1600):
+        t = time.perf_counter()
+        page = parse_html("https://cds.iisc.ac.in/x/", _nested_tables(levels))
+        assert time.perf_counter() - t < 10, levels                     # rt-baseline: > 60 s at 800 levels
+        assert len(page.sections) <= MAX_TABLE_DEPTH
+        assert sum(len(s.text) for s in page.sections) < 2000           # no repeated nested text
+
+
+def test_nested_table_rows_are_kept_once_and_ordinary_tables_are_unchanged():
+    from askiisc_retrieval.parse import parse_html
+    html = ("<html><body><main><h1>Page</h1><table><tr><th>Course</th><th>Instructor</th></tr>"
+            "<tr><td>DS 252</td><td>Yogesh <b>Simmhan</b></td></tr></table>"
+            "<table><tr><td>Outer A</td><td><table><tr><td>Inner 1</td><td>Inner 2</td></tr></table></td></tr></table>"
+            "</main></body></html>")
+    texts = [s.text for s in parse_html("https://cds.iisc.ac.in/x/", html).sections]
+    assert "Course: DS 252; Instructor: Yogesh Simmhan" in texts                # header row mapping as before
+    assert "Inner 1 | Inner 2" in texts                                        # nested table rows kept ...
+    assert sum("Inner 1" in t for t in texts) == 1                             # ... once
