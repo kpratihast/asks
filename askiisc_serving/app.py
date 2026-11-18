@@ -302,7 +302,6 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         if q.mode == "none" and (not s.allow_no_retrieval or not authorization or p.role != "admin"):
             app.state.metrics.reject(403, "mode_none_requires_auth", p.tenant)
             return _error(403, "Public chat requires document retrieval")
-            return _error(403, "Public chat requires document retrieval")
         if len(q.question) > s.max_question_chars:
             app.state.metrics.reject(422, "question_too_long", p.tenant)
             return _error(422, f"question longer than {s.max_question_chars} characters")
