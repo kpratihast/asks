@@ -71,7 +71,9 @@ The script waits for the exact requested checkpoint to appear at `/v1/models` be
 reporting readiness. Logs and selected-profile information are under `.local/model/`.
 If startup fails after the old server has stopped, inspect `./model.sh logs` and select
 another profile. A readiness timeout leaves the loading server available for inspection;
-`./model.sh stop` stops it.
+`./model.sh stop` stops it. A server that is stuck loading may not exit on Ctrl-C: if the
+graceful stop times out, `./model.sh stop --force` kills the managed model server's
+processes (only those under the managed `vllm` pane; other processes are never touched).
 
 ## Options
 
@@ -103,4 +105,8 @@ source ~/.venv-vllm-metal/bin/activate
 vllm serve --help
 ~~~
 
-The launcher passes --gpu-memory-utilization explicitly and clears obsolete Metal overrides. Runtime allocation still needs validation on the target Mac.
+The memory fraction is passed to vLLM as `--gpu-memory-utilization` (the setting vLLM-Metal
+reads; its startup log shows `Paged attention: using --gpu-memory-utilization=<fraction>`).
+The older `VLLM_METAL_MEMORY_FRACTION` / `VLLM_METAL_USE_PAGED_ATTENTION` variables are ignored
+by current vLLM-Metal and are cleared from the environment. On a 16 GiB Mac with little free
+memory, lower the budget further with `--memory-fraction`, e.g. `./model.sh 3b-quantized --memory-fraction 0.2`.

@@ -128,6 +128,37 @@ def test_stop_targets_only_owned_model_pane(monkeypatch):
     assert calls == [['tmux', 'send-keys', '-t', '%7', 'C-c']]
 
 
+def test_hung_stop_is_reported_and_force_kills_only_the_managed_tree(monkeypatch):
+    """#32: a model that never finishes loading does not exit on Ctrl-C. Without --force the stop reports it
+    and names the option; with --force only the processes under the managed pane are killed."""
+    p = {'id': '%7', 'pid': 100, 'dead': False}
+    monkeypatch.setattr(model, 'controlled_panes', lambda: [('askiisc-model:vllm', p)])
+    monkeypatch.setattr(model, 'assert_owned', lambda *a: None)
+    monkeypatch.setattr(model, 'run', lambda args, **kw: None)
+    monkeypatch.setattr(model, 'pane', lambda target: p)                     # never exits
+    monkeypatch.setattr(model.time, 'sleep', lambda s: None)
+    killed, port = [], {8000}
+    monkeypatch.setattr(model, 'listeners', lambda: set(port))
+    monkeypatch.setattr(model, 'processes', lambda: {100: (1, 'vllm serve'), 101: (100, 'EngineCore'),
+                                                     102: (101, 'worker'), 200: (1, 'other server')})
+    with pytest.raises(model.SwitchError, match='stop --force'):
+        model.stop(0)
+    def kill(pid, sig):
+        killed.append(pid)
+        port.clear()
+    monkeypatch.setattr(model.os, 'kill', kill)
+    model.stop(0, force=True)
+    assert sorted(killed) == [100, 101, 102]                                     # never PID 200
+
+
+def test_metal_memory_budget_is_passed_as_the_cli_argument_vllm_reads():
+    """#32: vLLM-Metal ignores VLLM_METAL_MEMORY_FRACTION and logs 'using --gpu-memory-utilization=0.92'."""
+    args = model.command(model.PROFILES['3b-quantized'], Path('/tmp/vllm'), 0.25)
+    assert args[args.index('--gpu-memory-utilization') + 1] == '0.25'
+    assert not any(a.startswith('VLLM_METAL_MEMORY_FRACTION=') for a in args)
+    assert args[args.index('VLLM_METAL_MEMORY_FRACTION') - 1] == '-u'            # inherited value cleared
+
+
 def test_concurrent_switch_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(model, 'STATE', tmp_path / 'state')
     with model.lock():
