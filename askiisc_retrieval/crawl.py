@@ -86,7 +86,18 @@ def links_in(html: bytes | str, base: str) -> list[str]:
 
 
 def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client, raw_name,
-          delay_s: float = 0.5, respect_robots: bool = True, log=print, *, department: str | None = None) -> list[dict]:
+          delay_s: float = 0.5, respect_robots: bool = True, log=print, *, department: str | None = None,
+          refresh: bool = False, versions=None) -> list[dict]:
+    """Breadth-first crawl of one department host (FR-1).
+
+    Without `refresh`, a page already saved is reused as a frozen snapshot. With `refresh`, saved pages are
+    re-requested with If-None-Match / If-Modified-Since; a 304 or an unchanged content hash writes nothing,
+    and a changed page is stored as a new immutable version with the previous one kept (FR-3)."""
+    if versions is None:
+        from .versions import RawVersions
+        with RawVersions(RAW_DIR, raw_name) as own:
+            return crawl(seeds, max_depth, max_pages, client, raw_name, delay_s, respect_robots, log,
+                         department=department, refresh=refresh, versions=own)
     home = urlparse(normalise(seeds[0])).netloc
     if any(urlparse(normalise(seed)).netloc != home for seed in seeds):
         raise ValueError("Use a separate crawl group for each department host")
@@ -125,13 +136,15 @@ def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client
         if not fetch_ok:
             continue
         path = RAW_DIR / raw_name(url)
-        if path.exists():
-            body = path.read_bytes()                    # frozen snapshot: never re-download
+        if path.exists() and not refresh:
+            body = path.read_bytes()                    # frozen snapshot: reused unless refreshing
         else:
             try:
                 for _ in range(10):
                     seen.add(url)
-                    r = client.get(url, follow_redirects=False)
+                    # On refresh a saved page is re-checked conditionally (FR-1); the first request of a
+                    # page never saved before carries no validators.
+                    r = client.get(url, follow_redirects=False, headers=versions.conditional_headers(url) or None)
                     time.sleep(delay_s)
                     if r.status_code not in {301, 302, 303, 307, 308}:
                         break
@@ -149,22 +162,28 @@ def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client
             except httpx.HTTPError as e:
                 log(f"  FAILED  {url} ({type(e).__name__})")
                 continue
-            ctype = r.headers.get("content-type", "html").lower()
-            is_pdf = bool(PDF_EXT.search(urlparse(url).path)) or "application/pdf" in ctype
-            if r.status_code != 200 or not ("html" in ctype or is_pdf):
-                continue
-            if is_pdf and (not r.content.startswith(b"%PDF") or len(r.content) > MAX_SOURCE_BYTES):
-                log(f"  SKIPPED {url} (not a PDF or over the size limit)")
-                continue
-            final = normalise(str(r.url))
-            if not allowed(final)[0]:
-                continue
-            if final != url and final in seen:
-                continue
-            seen.add(final)
-            body = r.content
-            path.write_bytes(body)
-            log(f"  saved   d{depth} {url}")
+            if r.status_code == 304 and path.is_file():
+                versions.not_modified(url)              # unchanged: nothing downloaded or written
+                body = path.read_bytes()
+            else:
+                ctype = r.headers.get("content-type", "html").lower()
+                is_pdf = bool(PDF_EXT.search(urlparse(url).path)) or "application/pdf" in ctype
+                if r.status_code != 200 or not ("html" in ctype or is_pdf):
+                    continue
+                if is_pdf and (not r.content.startswith(b"%PDF") or len(r.content) > MAX_SOURCE_BYTES):
+                    log(f"  SKIPPED {url} (not a PDF or over the size limit)")
+                    continue
+                final = normalise(str(r.url))
+                if not allowed(final)[0]:
+                    continue
+                if final != url and final in seen:
+                    continue
+                seen.add(final)
+                body = r.content
+                status = versions.record(url, body, etag=r.headers.get("etag"),
+                                         last_modified=r.headers.get("last-modified"))
+                if status != "unchanged":
+                    log(f"  {'saved' if status == 'new' else 'changed':7} d{depth} {url}")
         entry = {"url": url, "depth": depth, "doc_type": doc_type_for(url, home)}
         if body.startswith(b"%PDF"):
             entry["format"] = "pdf"                     # parsed by the PDF extractor at ingestion
@@ -183,5 +202,6 @@ def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client
         host = urlparse(page["url"]).netloc
         return host == home or host.endswith("." + home)
     retained = [page for page in previous if not belongs_to_host(page)]
-    index.write_text(json.dumps(retained + pages, indent=1), encoding="utf-8")
+    from .versions import write_if_changed
+    write_if_changed(index, json.dumps(retained + pages, indent=1))   # unchanged crawl: file untouched
     return pages

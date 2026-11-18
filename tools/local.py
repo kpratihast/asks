@@ -76,7 +76,8 @@ def prepare(refresh=False, rebuild=False):
     import httpx
     from askiisc_retrieval import config
     from askiisc_retrieval.cli import make_embedder, safe_rebuild
-    from askiisc_retrieval.fetch import UA, download_source, load_sources, raw_name
+    from askiisc_retrieval.fetch import UA, load_sources, raw_name, refresh_source
+    from askiisc_retrieval.versions import RawVersions, write_if_changed
 
     if config.BACKEND != "stub" or config.QDRANT_URL:
         raise SystemExit("Local prepare requires ASKIISC_BACKEND=stub and QDRANT_URL unset. "
@@ -88,13 +89,16 @@ def prepare(refresh=False, rebuild=False):
     available, manifest = 0, {}
     # Fixed approved source list only: no synthetic fixtures, no unbounded crawl.
     sources = load_sources()
-    with httpx.Client(timeout=45, follow_redirects=True, headers={"User-Agent": UA}, trust_env=False) as client:
+    # FR-1/FR-3: a refresh re-checks each page conditionally and stores it, as a new immutable version,
+    # only when its content changed; an unchanged page is not rewritten.
+    with RawVersions(config.RAW_DIR, raw_name) as versions, \
+            httpx.Client(timeout=45, follow_redirects=True, headers={"User-Agent": UA}, trust_env=False) as client:
         for pg in sources["pages"]:
             target = config.RAW_DIR / raw_name(pg["url"])
             try:
                 if refresh or not target.exists():
-                    target.write_bytes(download_source(client, pg["url"]))
-                    manifest[pg["url"]] = {"file": target.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                    if refresh_source(client, versions, pg["url"]) != "unchanged":
+                        manifest[pg["url"]] = {"file": target.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
                     time.sleep(0.5)
                 available += 1
                 print("Source:", pg["url"], flush=True)
@@ -104,7 +108,7 @@ def prepare(refresh=False, rebuild=False):
         raise SystemExit("No configured source pages could be fetched; check network access and retry.")
     old_manifest = config.RAW_DIR / "index.json"
     previous = json.loads(old_manifest.read_text()) if old_manifest.exists() else {}
-    old_manifest.write_text(json.dumps({**previous, **manifest}, indent=2))
+    write_if_changed(old_manifest, json.dumps({**previous, **manifest}, indent=2))
     # Include the full cached crawl and bounded admissions snapshot on rebuild;
     # rebuilding only the small seed list would silently discard most local knowledge.
     from askiisc_retrieval.ingest_stub import load_page_inputs

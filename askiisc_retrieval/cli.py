@@ -1,6 +1,7 @@
 """Command line entry point.
 
     python -m askiisc_retrieval.cli fetch            # save the CDS pages once (needs internet)
+    python -m askiisc_retrieval.cli refresh [--ingest] [--every 24] [--trigger]   # FR-1 conditional refresh
     python -m askiisc_retrieval.cli ingest           # parse, chunk, embed, index (offline)
     python -m askiisc_retrieval.cli ask "Who teaches DS 252?" [--scope public student] [--no-graph]
     python -m askiisc_retrieval.cli eval [--k 5] [--no-graph]
@@ -86,11 +87,13 @@ def _open_stack():
 def cmd_fetch(a):
     from .fetch import fetch_all
     res = fetch_all(refresh=a.refresh)
-    listed = [r for r in res if r["url"] != "(crawl)"]
-    print(f"\nListed pages: {sum(r['status'] in ('saved', 'cached') for r in listed)}/{len(listed)} available")
+    listed = [r for r in res if not r["url"].startswith("(")]
+    print(f"\nListed pages: {sum(r['status'] in ('saved', 'cached', 'unchanged') for r in listed)}/{len(listed)} available")
     for r in res:
         if r["url"] == "(crawl)":
             print(f"Crawl: {r['status']}")
+        elif r["url"] == "(versions)":
+            print(f"Versions this run: {r['status'] or 'none fetched'} (see {config.RAW_DIR / 'versions'})")
     print(f"Raw pages are in {config.RAW_DIR}")
 
 
@@ -120,6 +123,20 @@ def safe_rebuild(pages, emb) -> dict:
         store.close()
     atomic_write_text(config.DATA / "extraction_failures.json", json.dumps(rep.get("failures", []), indent=2))
     return rep
+
+
+def cmd_refresh(a):
+    from . import refresh
+    if a.trigger:
+        print(f"Refresh requested ({refresh.trigger()}); a running scheduler starts it within 30 seconds.")
+        return
+    if a.every:
+        refresh.schedule(a.every, ingest=a.ingest)
+        return
+    status = refresh.run_refresh(ingest=a.ingest)
+    print(json.dumps(status, indent=2))
+    if not status["ok"]:
+        sys.exit(1)
 
 
 def cmd_ingest(a):
@@ -320,6 +337,11 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch"); f.add_argument("--refresh", action="store_true"); f.set_defaults(fn=cmd_fetch)
     sub.add_parser("ingest").set_defaults(fn=cmd_ingest)
+    rf = sub.add_parser("refresh", help="conditional re-check of every source; store changed pages as new versions")
+    rf.add_argument("--ingest", action="store_true", help="rebuild the index when a page changed")
+    rf.add_argument("--every", type=float, metavar="HOURS", help="scheduler: refresh now and then every HOURS (24)")
+    rf.add_argument("--trigger", action="store_true", help="maintainer trigger: make a running scheduler refresh now")
+    rf.set_defaults(fn=cmd_refresh)
     q = sub.add_parser("ask"); q.add_argument("question")
     q.add_argument("--scope", nargs="+", default=["public"], help="user scopes, e.g. public student")
     q.add_argument("--no-graph", action="store_true"); q.add_argument("--full", action="store_true")

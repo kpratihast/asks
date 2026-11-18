@@ -94,9 +94,15 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
         # Nothing indexable: keep the previous snapshot rather than activating an empty corpus (FR-4).
         raise RuntimeError(f"no page could be indexed ({len(failures)} extraction failures); "
                            "the previous snapshot is still active")
-    print(f"Embedding {len(all_chunks)} chunks with {embedder.model_id} ...")
-    vectors = embedder.embed_documents([c.embedding_input() for c in all_chunks])
-    store.upsert(all_chunks, vectors)
+    # FR-3: a page whose version did not change keeps its stored vectors; only new or changed chunks are
+    # embedded and written (an unchanged corpus re-embeds nothing).
+    unchanged = store.unchanged_chunk_ids(all_chunks) if hasattr(store, "unchanged_chunk_ids") else set()
+    todo = [c for c in all_chunks if c.chunk_id not in unchanged]
+    print(f"Embedding {len(todo)} of {len(all_chunks)} chunks with {embedder.model_id} "
+          f"({len(all_chunks) - len(todo)} unchanged chunks keep their stored vectors) ...")
+    if todo:
+        vectors = embedder.embed_documents([c.embedding_input() for c in todo])
+        store.upsert(todo, vectors)
 
     # Activation order (FR-4): new vectors are added alongside the old ones, then the graph and chunk
     # list are replaced atomically, and the snapshot - which names the graph by hash - is replaced last.
@@ -114,7 +120,7 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
     JsonSnapshotProvider.write(snapshot_path, snap)
     untermed = [c.section_heading for c in all_chunks if c.doc_type == "schedule" and c.academic_term is None]
     return {"pages": report, "failures": failures, "built_versions": sorted({c.version_id for c in all_chunks}),
-            "chunks": len(all_chunks), "edges": len(graph.edges), "snapshot": snap.snapshot_id,
+            "chunks": len(all_chunks), "embedded": len(todo), "edges": len(graph.edges), "snapshot": snap.snapshot_id,
             "untermed_schedule": untermed, "template_removed": template_removed}
 
 

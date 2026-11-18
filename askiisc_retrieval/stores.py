@@ -184,6 +184,18 @@ class QdrantStore:
     def point_id(chunk_id: str) -> str:
         return str(uuid.UUID(hashlib.md5(chunk_id.encode()).hexdigest()))
 
+    def unchanged_chunk_ids(self, chunks: list[ChunkPayload]) -> set[str]:
+        """Chunks already stored with an identical payload (same version, text, metadata and embedding model).
+        Their stored vectors are still valid, so a rebuild need not embed or write them again (FR-3)."""
+        import json as _json
+        wanted = {self.point_id(c.chunk_id): _json.loads(_json.dumps(c.to_dict())) for c in chunks}
+        ids, same = list(wanted), set()
+        for i in range(0, len(ids), 256):
+            for point in self.c.retrieve(self.col, ids=ids[i:i + 256], with_payload=True, with_vectors=False):
+                if point.payload == wanted.get(str(point.id)):
+                    same.add(point.payload["chunk_id"])
+        return same
+
     def upsert(self, chunks: list[ChunkPayload], vectors: list[list[float]]) -> None:
         pts = [self.m.PointStruct(id=self.point_id(c.chunk_id), vector=v, payload=c.to_dict())
                for c, v in zip(chunks, vectors)]

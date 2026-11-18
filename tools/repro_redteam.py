@@ -247,6 +247,59 @@ def _():
     ok = all("'sha256-" + base64.b64encode(hashlib.sha256(s).digest()).decode() + "'" in r.headers["content-security-policy"] for s in scripts)
     return f"CSP hash matches the served script={ok} ({'UI runs' if ok else 'browser blocks the UI'})"
 
+@case("#21/#22 FR-1/FR-3 fetch, then fetch --refresh on a site with ETags")
+def _():
+    """Nimbus's two-pass procedure on a fake site: one listed page with an ETag, a crawled home page with an
+    ETag, one crawled page without. Between the passes the listed page changes."""
+    from askiisc_retrieval import config, crawl as crawl_mod, fetch as fetch_mod
+    d = pathlib.Path(tempfile.mkdtemp()); raw = d / "raw"
+    listed, home = "https://www.iisc.ac.in/admissions/fees/", "https://cds.iisc.ac.in/"
+    def html(text, links=""):
+        return f"<html><body><main><h1>Page</h1><p>{text}</p>{links}</main></body></html>".encode()
+    site = {listed: [html("The PhD application fee is Rs 500 for all applicants."), '"fee-1"'],
+            home: [html("Department of Computational and Data Sciences.", '<a href="/academics/">A</a>'), '"home-1"'],
+            home + "academics/": [html("CDS offers MTech and PhD programmes."), None]}
+    sent = []
+    def handler(req):
+        url = str(req.url)
+        if url.endswith("robots.txt"):
+            return httpx.Response(404)
+        sent.append((url, req.headers.get("if-none-match") or req.headers.get("if-modified-since")))
+        body, etag = site[url]
+        if etag and req.headers.get("if-none-match") == etag:
+            return httpx.Response(304)
+        return httpx.Response(200, content=body, headers={"content-type": "text/html", **({"etag": etag} if etag else {})})
+    (d / "sources.yaml").write_text(f"department: CDS\npages:\n  - {{url: '{listed}', department: CDS, doc_type: admissions, scope: public}}\n"
+                                    f"crawls:\n  - {{seeds: ['{home}'], department: CDS, max_depth: 1, max_pages: 5, delay_s: 0}}\n")
+    os.environ["ASKIISC_SOURCES_FILE"] = str(d / "sources.yaml"); os.environ["ASKIISC_SOURCE_DEPARTMENTS"] = "CDS"
+    for m in (config, fetch_mod, crawl_mod):
+        m.RAW_DIR = raw
+    real = httpx.Client
+    fetch_mod.httpx.Client = lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    fetch_mod.time.sleep = crawl_mod.time.sleep = lambda s: None
+    import contextlib, io
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            fetch_mod.fetch_all(refresh=False, delay_s=0)
+        def snap():
+            return {p.relative_to(raw): (p.read_bytes(), p.stat().st_mtime_ns) for p in raw.rglob("*")
+                    if p.is_file() and "versions" not in p.relative_to(raw).parts}
+        before = snap(); old = site[listed][0]
+        site[listed] = [html("The PhD application fee is Rs 800 for all applicants."), '"fee-2"']
+        sent.clear()
+        with contextlib.redirect_stdout(io.StringIO()):
+            fetch_mod.fetch_all(refresh=True, delay_s=0)
+        after = snap()
+        unchanged_rewritten = sum(1 for k in before if k in after and before[k][0] == after[k][0] and before[k][1] != after[k][1])
+        crawled = sum(1 for u, _ in sent if u.startswith(home))
+        conditional = sum(1 for _, h in sent if h)
+        old_kept = any(p.read_bytes() == old for p in raw.rglob("*") if p.is_file())
+    finally:
+        fetch_mod.httpx.Client = real
+    return (f"refresh pass: {len(sent)} requests, {conditional} conditional, crawled pages re-requested {crawled}/2, "
+            f"unchanged files rewritten {unchanged_rewritten}, previous version of the changed page kept: {old_kept}")
+
+
 @case("Cloudhack: placeholder keys in serving_keys.example.yaml")
 def _():
     from askiisc_serving.auth import KeyStore

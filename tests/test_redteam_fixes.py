@@ -474,9 +474,12 @@ BAD_HTML = ("<html><body><main><h2 data-askiisc-department='ZZZ'>Broken section<
             "</p></main></body></html>")
 
 
-def _pages(bad=True):
-    pages = [PageInput(SCHEDULE, (PAGES / "schedule.html").read_text(), "schedule", "public"),
-             PageInput(MTECH, (PAGES / "mtech.html").read_text(), "policy", "public")]
+def _pages(bad=True, changed=False):
+    """changed=True: every page is a new version (a source changed), so a rebuild has to embed it. An unchanged
+    rebuild re-embeds nothing (#22), so the crash-mid-embedding tests below rebuild changed pages."""
+    tag = "refreshed" if changed else ""
+    pages = [PageInput(SCHEDULE, (PAGES / "schedule.html").read_text(), "schedule", "public", version_tag=tag),
+             PageInput(MTECH, (PAGES / "mtech.html").read_text(), "policy", "public", version_tag=tag)]
     if bad:
         pages.append(PageInput(BAD_URL, BAD_HTML, "policy", "public", tagged_departments=True))
     return pages
@@ -519,8 +522,7 @@ def test_failed_rebuild_keeps_previous_snapshot_and_vectors(tmp_path):
     class Broken(HashEmbedder):
         def embed_documents(self, texts):
             raise RuntimeError("embedding server crashed mid-build")
-    changed = _pages(bad=False)
-    changed[0] = PageInput(SCHEDULE, (PAGES / "schedule.html").read_text() + "<p>new</p>", "schedule", "public")
+    changed = _pages(bad=False, changed=True)                 # the sources changed: the rebuild must embed
     with pytest.raises(RuntimeError):
         build_index(changed, Broken(), store, tmp_path / "graph.json", tmp_path / "snapshot.json")
     with pytest.raises(RuntimeError, match="previous snapshot is still active"):
@@ -605,6 +607,7 @@ def test_cli_ingest_does_not_wipe_the_live_index_when_a_rebuild_fails(tmp_path, 
         def embed_documents(self, texts):
             raise RuntimeError("crash mid-build")
     monkeypatch.setattr(cli, "make_embedder", lambda *a, **k: Broken())
+    monkeypatch.setattr(ingest_stub, "load_page_inputs", lambda *a, **k: _pages(changed=True))   # sources changed
     with pytest.raises(RuntimeError):
         cli.cmd_ingest(None)
     assert (tmp_path / "snapshot.json").read_text() == before
@@ -781,7 +784,7 @@ class Slow(HashEmbedder):
         (d / "embedding-started").write_text("1")
         time.sleep(60)                              # killed here, part-way through the refresh
         return super().embed_documents(texts)
-cli.safe_rebuild(_pages(), Slow())
+cli.safe_rebuild(_pages(changed=True), Slow())      # changed sources, so the refresh has to embed
 """
 
 
@@ -810,10 +813,23 @@ def test_killed_rebuild_through_the_launcher_path_keeps_the_live_index(tmp_path,
             time.sleep(0.05)
         assert (tmp_path / "embedding-started").exists(), "rebuild never reached embedding"
     finally:
+        if os.name == "nt":
+            # A venv's python.exe on Windows is a launcher with the interpreter as a child process; kill the
+            # whole tree, as the OOM killer or closing the console would.
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
         proc.kill()                                          # SIGKILL on Linux, TerminateProcess on Windows
         proc.wait(timeout=30)
     assert (tmp_path / "snapshot.json").read_text() == before
-    store = cli.make_store()
+    for _ in range(100):                                     # Windows releases the dead process's lock shortly after
+        try:
+            store = cli.make_store()
+            break
+        except RuntimeError as exc:
+            if "already accessed" not in str(exc):
+                raise
+            time.sleep(0.1)
+    else:
+        store = cli.make_store()
     try:
         assert store.count() > 0
         assert _retriever(tmp_path, store).retrieve("DS 252", ["public"]).passages     # still answers

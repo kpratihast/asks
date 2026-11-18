@@ -24,14 +24,18 @@ class Snapshot:
 
 def atomic_write_text(path: Path, text: str) -> None:
     """Write via a temporary file in the same folder and os.replace, so a reader sees the whole old file or
-    the whole new one, never a truncated one (FR-4)."""
+    the whole new one, never a truncated one (FR-4). The text's own "\n" is written on every OS, so the
+    bytes on disk (and their hash) are the same on Windows and Linux."""
+    atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Atomic replace of `path` with `data` (temporary file in the same folder, fsync, os.replace)."""
     path = Path(path)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        # newline="": write the text's own "\n" on every OS, so the bytes on disk (and their hash) are
-        # the same on Windows and Linux.
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         deadline = time.monotonic() + 10
