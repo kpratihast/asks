@@ -101,12 +101,21 @@ class EmailAuth:
         c.executescript('''
             CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS challenges (
-                id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, digest TEXT NOT NULL,
+                id TEXT PRIMARY KEY, email TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '', digest TEXT NOT NULL,
                 expires REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS sends (email TEXT NOT NULL, ip TEXT NOT NULL, at REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS sends_at ON sends(at);
             CREATE TABLE IF NOT EXISTS sessions (digest TEXT PRIMARY KEY, email TEXT NOT NULL, expires REAL NOT NULL);
         ''')
+        # #47: one pending challenge per email let anyone invalidate a user's code by requesting another.
+        # Older databases have email UNIQUE and no requester column; pending codes are short-lived, so that
+        # table is recreated.
+        schema = c.execute("SELECT sql FROM sqlite_master WHERE name='challenges'").fetchone()[0] or ''
+        if 'UNIQUE' in schema or ' ip ' not in schema:
+            c.execute('DROP TABLE challenges')
+            c.execute("CREATE TABLE challenges (id TEXT PRIMARY KEY, email TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '', "
+                      'digest TEXT NOT NULL, expires REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)')
+        c.execute('CREATE INDEX IF NOT EXISTS challenges_email ON challenges(email)')
         c.execute('INSERT OR IGNORE INTO meta VALUES (?, ?)', ('otp_secret', secrets.token_bytes(32)))
         c.commit()
         try:
@@ -132,18 +141,27 @@ class EmailAuth:
             c.execute('DELETE FROM sends WHERE at < ?', (now - 86400,))
             c.execute('DELETE FROM challenges WHERE expires < ?', (now,))
             c.execute('DELETE FROM sessions WHERE expires < ?', (now,))
-            last = c.execute('SELECT MAX(at) FROM sends WHERE email=?', (email,)).fetchone()[0]
+            # #47: the cooldown and the 5/hour limit for an address count the requesting client only, so
+            # requests from someone else cannot use up the owner's allowance; a higher per-address cap still
+            # limits how many codes anyone can send to one inbox.
+            last = c.execute('SELECT MAX(at) FROM sends WHERE email=? AND ip=?', (email, ip)).fetchone()[0]
             if last is not None and now - last < self.s.cooldown:
                 raise AuthError(429, 'Please wait before requesting another code.', max(1, int(self.s.cooldown - (now-last))))
+            per_email_ip = c.execute('SELECT COUNT(*) FROM sends WHERE email=? AND ip=? AND at>?',
+                                     (email, ip, now - 3600)).fetchone()[0]
             per_email = c.execute('SELECT COUNT(*) FROM sends WHERE email=? AND at>?', (email, now - 3600)).fetchone()[0]
             per_ip = c.execute('SELECT COUNT(*) FROM sends WHERE ip=? AND at>?', (ip, now - 3600)).fetchone()[0]
             hourly = c.execute('SELECT COUNT(*) FROM sends WHERE at>?', (now - 3600,)).fetchone()[0]
             daily = c.execute('SELECT COUNT(*) FROM sends WHERE at>?', (now - 86400,)).fetchone()[0]
-            if per_email >= 5 or per_ip >= 20 or hourly >= self.s.max_sends_hour or daily >= self.s.max_sends_day:
+            if (per_email_ip >= 5 or per_email >= 15 or per_ip >= 20
+                    or hourly >= self.s.max_sends_hour or daily >= self.s.max_sends_day):
                 raise AuthError(429, 'Too many code requests. Try again later.', 3600)
             challenge, code = secrets.token_urlsafe(24), f'{secrets.randbelow(1000000):06d}'
-            c.execute('INSERT OR REPLACE INTO challenges(id,email,digest,expires,attempts) VALUES (?,?,?,?,0)',
-                      (challenge, email, self._digest(c, challenge, code), now + self.s.otp_ttl))
+            # A resend replaces the requester's own previous code (only the latest code is valid), but a request
+            # from another client never invalidates someone else's pending code (#47).
+            c.execute('DELETE FROM challenges WHERE email=? AND ip=?', (email, ip))
+            c.execute('INSERT INTO challenges(id,email,ip,digest,expires,attempts) VALUES (?,?,?,?,?,0)',
+                      (challenge, email, ip, self._digest(c, challenge, code), now + self.s.otp_ttl))
             send_row = c.execute('INSERT INTO sends VALUES (?,?,?)', (email, ip, now)).lastrowid
         try:
             self.mailer.send(email, code)
