@@ -36,8 +36,9 @@ class RequestGuard:
         self.buckets = OrderedDict()
         self.global_buckets = {}
         self.readers = 0
-        html = (Path(__file__).parent / 'static/index.html').read_text()
-        hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() + "'"
+        # Hash the exact bytes FileResponse serves (UTF-8, no newline translation) on every OS.
+        html = (Path(__file__).parent / 'static/index.html').read_bytes().decode('utf-8')
+        hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode('utf-8')).digest()).decode() + "'"
                   for s in re.findall(r'<script>(.*?)</script>', html, re.S)]
         self.headers = {
             'content-security-policy': "default-src 'none'; script-src " + ' '.join(hashes) +
@@ -100,6 +101,9 @@ class RequestGuard:
         origin = os.environ.get('AUTH_PUBLIC_ORIGIN')
         if origin and authority.hostname not in {urlsplit(origin).hostname,'127.0.0.1','::1','localhost'}:
             return await reject(400, 'Unrecognized host')
+        allowed = {h.strip().lower() for h in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,::1,testserver').split(',')}
+        if not origin and authority.hostname not in allowed:
+            return await reject(400, 'Unrecognized host')
         # Reject ambiguous framing even on development/direct ASGI deployments.
         for name in [b'host', b'content-length', b'content-type', b'authorization', b'origin', b'transfer-encoding']:
             if sum(k.lower()==name for k,v in raw_headers) > 1:
@@ -123,7 +127,7 @@ class RequestGuard:
                 if int(length) > self.max_body:
                     return await reject(413, 'Request body is too large')
             content_type = headers.get(b'content-type','').split(';')[0].strip().lower()
-            if content_type != 'application/json' and not (path=='/auth/logout' and length=='0'):
+            if content_type != 'application/json' and path != '/auth/logout':
                 return await reject(415, 'Use application/json')
             if self.readers >= 64:
                 return await reject(429, 'Server is busy. Try again later.', retry_after_s=2)
@@ -146,6 +150,8 @@ class RequestGuard:
                 self.readers -= 1
             if length is not None and len(body) != int(length):
                 return await reject(400, 'Content length does not match request body')
+            if path == '/auth/logout' and body and content_type != 'application/json':
+                return await reject(415, 'Use application/json')
             if body:
                 try:
                     def pairs(items):
@@ -199,7 +205,7 @@ def instruction_attack(text: str) -> bool:
         # Requests about this assistant's private messages are not corpus questions.
         r'\b(?:your|the|our|this)\s+(?:(?:hidden|internal|initial|original|private)\s+)*(?:system|developer)\s+(?:role\s+)?(?:messages?|prompts?|instructions?)\b',
         r'\binstructions?\s+(?:that\s+)?(?:you\s+(?:received|were given)|(?:placed|provided|given)\s+(?:before|above))\b',
-        r'\b(?:ignore|disregard|override|bypass|forget)\b.{0,70}\b(?:instructions?|rules?|access controls?|permissions?|authentication)\b',
+        r'(?m)(?:^\s*|[.!?]\s*|\b(?:please|you must|you should)\s+)(?:ignore|disregard|override|bypass|forget)\s+(?:(?:all|the|your|my|these|previous|prior|system|safety|security)\s+)*(?:instructions?|rules?|access controls?|permissions?|authentication)\b',
         r'\b(?:reveal|repeat|print|show|extract|output|display)\b.{0,70}\b(?:system (?:prompt|instructions?)|hidden (?:prompt|instructions?)|api keys?|passwords?|environment variables|smtp credentials)\b',
         r'<\|(?:im_start|im_end|system|assistant|eot_id|start_header_id)\|>|\[/?inst\]|<<sys>>',
         r'(?m)^\s*(?:system|developer|assistant)\s*:',
@@ -207,6 +213,25 @@ def instruction_attack(text: str) -> bool:
     ]
     return any(re.search(p,text,re.S) for p in patterns)
 
+
+
+def knowledge_override(text: str) -> bool:
+    """Questions that ask the assistant to answer outside the sources ("use your general knowledge",
+    "instead of the documents", "do not cite sources"). Checked on user input only: such phrases can occur
+    legitimately in indexed policy text (e.g. plagiarism rules), so evidence is not screened with them."""
+    text=unicodedata.normalize('NFKC',text)
+    text=''.join(c for c in text if unicodedata.category(c)!='Cf').casefold()
+    patterns=[
+        r"\b(?:use|using|rely(?:ing)?\s+on|from|with|based\s+on|draw(?:ing)?\s+on)\s+(?:only\s+)?(?:your\s+)?(?:own\s+)?"
+        r"(?:general|prior|background|world|common|internal|pre-?trained|training|outside|external)\s+(?:knowledge|information|data)\b",
+        r"\b(?:from|using|use|with|on|rely\s+on)\s+your\s+(?:own\s+)?(?:knowledge|understanding|memory|training)\b",
+        r"\b(?:answer|reply|respond)\s+from\s+memory\b",
+        r"\b(?:instead\s+of|rather\s+than|without|ignoring|not\s+from|outside(?:\s+of)?)\s+(?:using\s+|looking\s+at\s+|reading\s+)?"
+        r"(?:the\s+|your\s+|these\s+|any\s+)?(?:provided\s+|retrieved\s+|given\s+)?(?:documents?|sources?|context|evidence|passages?|corpus)\b",
+        r"\b(?:do\s+not|don['’]?t|never|without|no\s+need\s+to)\s+(?:cite|citing|use|using|include|including|give|giving|add|adding)\s+"
+        r"(?:any\s+)?(?:the\s+)?(?:sources?|citations?|references?|markers?)\b",
+    ]
+    return any(re.search(p,text) for p in patterns)
 
 def evidence_instruction_attack(hit: dict) -> bool:
     fields = ('text', 'title', 'section', 'programme', 'department', 'instructor', 'excerpt', 'location')

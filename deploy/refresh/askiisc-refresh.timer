@@ -1,0 +1,13 @@
+# Runs askiisc-refresh.service every 24 hours (FR-1). Persistent: a run missed while the host was off
+# starts at the next boot. Urgent notices: `python -m askiisc_retrieval.cli refresh` (or
+# `systemctl start askiisc-refresh.service`) refreshes immediately.
+[Unit]
+Description=Daily Ask IISc source refresh
+
+[Timer]
+OnCalendar=*-*-* 21:30:00 UTC
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

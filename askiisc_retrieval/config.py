@@ -102,7 +102,7 @@ PEOPLE_K = int(os.environ.get("ASKIISC_PEOPLE_K", "5"))   # people-pass size; 0 
 PEOPLE_DOC_TYPES = ("people",)                              # doc_type of profile / research-interest pages
 GRAPH_EXTRA = 3          # max extra passages graph expansion may add (E5 tunes this)
 GRAPH_HOPS = 2           # walks only through Course/Person nodes, so 2 hops stays small
-GRAPH_TIMEOUT_S = 0.5
+GRAPH_TIMEOUT_S = float(os.environ.get("ASKIISC_GRAPH_TIMEOUT_S", "0.5"))
 
 
 def current_term(today: date | None = None) -> str:

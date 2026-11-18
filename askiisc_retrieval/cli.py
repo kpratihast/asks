@@ -1,6 +1,7 @@
 """Command line entry point.
 
     python -m askiisc_retrieval.cli fetch            # save the CDS pages once (needs internet)
+    python -m askiisc_retrieval.cli refresh [--ingest] [--every 24] [--trigger]   # FR-1 conditional refresh
     python -m askiisc_retrieval.cli ingest           # parse, chunk, embed, index (offline)
     python -m askiisc_retrieval.cli ask "Who teaches DS 252?" [--scope public student] [--no-graph]
     python -m askiisc_retrieval.cli eval [--k 5] [--no-graph]
@@ -86,24 +87,65 @@ def _open_stack():
 def cmd_fetch(a):
     from .fetch import fetch_all
     res = fetch_all(refresh=a.refresh)
-    listed = [r for r in res if r["url"] != "(crawl)"]
-    print(f"\nListed pages: {sum(r['status'] in ('saved', 'cached') for r in listed)}/{len(listed)} available")
+    listed = [r for r in res if not r["url"].startswith("(")]
+    print(f"\nListed pages: {sum(r['status'] in ('saved', 'cached', 'unchanged') for r in listed)}/{len(listed)} available")
     for r in res:
         if r["url"] == "(crawl)":
             print(f"Crawl: {r['status']}")
+        elif r["url"] == "(versions)":
+            print(f"Versions this run: {r['status'] or 'none fetched'} (see {config.RAW_DIR / 'versions'})")
     print(f"Raw pages are in {config.RAW_DIR}")
 
 
+def safe_rebuild(pages, emb) -> dict:
+    """Rebuild the index without ever emptying the live one (FR-4). Used by `cli ingest` and by the
+    launcher (`./run-local.sh --rebuild` / `tools/local.py`), so both refresh paths behave the same.
+
+    New versions are added next to the old ones; the snapshot switches only after the build succeeds,
+    and only then are versions it no longer uses removed. A failed or killed rebuild (crash, Ctrl-C,
+    out-of-memory kill) leaves the previous snapshot, its vectors and its graph serving. Extraction
+    failures are written to data/extraction_failures.json (FR-2)."""
+    from .ingest_stub import build_index
+    from .snapshot import atomic_write_text
+    config.DATA.mkdir(parents=True, exist_ok=True)
+    store = make_store()
+    size = store.vector_size()
+    if size is not None and size != config.EMBED_DIM:
+        # A different embedding size cannot share the collection; the old snapshot is for another
+        # embedding model and cannot be served by this configuration anyway.
+        print(f"Embedding size changed ({size} -> {config.EMBED_DIM}); starting a new collection.", file=sys.stderr)
+        store.close()
+        store = make_store(reset=True)
+    try:
+        rep = build_index(pages, emb, store, config.GRAPH_PATH, config.SNAPSHOT_PATH, config.CHUNKS_PATH)
+        store.prune(rep["built_versions"])
+    finally:
+        store.close()
+    atomic_write_text(config.DATA / "extraction_failures.json", json.dumps(rep.get("failures", []), indent=2))
+    return rep
+
+
+def cmd_refresh(a):
+    from . import refresh
+    if a.trigger:
+        print(f"Refresh requested ({refresh.trigger()}); a running scheduler starts it within 30 seconds.")
+        return
+    if a.every:
+        refresh.schedule(a.every, ingest=a.ingest)
+        return
+    status = refresh.run_refresh(ingest=a.ingest)
+    print(json.dumps(status, indent=2))
+    if not status["ok"]:
+        sys.exit(1)
+
+
 def cmd_ingest(a):
-    from .ingest_stub import build_index, load_page_inputs
+    from .ingest_stub import load_page_inputs
     pages = load_page_inputs()
     if not pages:
         sys.exit("Nothing to ingest. Run `fetch` first.")
     config.DATA.mkdir(exist_ok=True)
-    emb = make_embedder()
-    store = make_store(reset=True)                       # stub rebuilds from scratch each time
-    rep = build_index(pages, emb, store, config.GRAPH_PATH, config.SNAPSHOT_PATH, config.CHUNKS_PATH)
-    store.close()
+    rep = safe_rebuild(pages, make_embedder())
     print()
     for p in rep["pages"]:
         if "version_id" in p:
@@ -111,6 +153,9 @@ def cmd_ingest(a):
             print(f"  {p['chunks']:4d} chunks  terms {p['terms']:<22} {p['url']}{flag}")
         else:
             print(f"  {p['status']}: {p['url']}")
+    if rep.get("failures"):
+        print(f"\n!! {len(rep['failures'])} page(s) failed extraction and were not indexed "
+              f"(see {config.DATA / 'extraction_failures.json'})")
     if rep.get("template_removed"):
         parts = ", ".join(f"'{h}' x{n}" for h, n in sorted(rep["template_removed"].items(), key=lambda kv: -kv[1]))
         print(f"\nRemoved repeated site-template sections: {parts}")
@@ -292,6 +337,11 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch"); f.add_argument("--refresh", action="store_true"); f.set_defaults(fn=cmd_fetch)
     sub.add_parser("ingest").set_defaults(fn=cmd_ingest)
+    rf = sub.add_parser("refresh", help="conditional re-check of every source; store changed pages as new versions")
+    rf.add_argument("--ingest", action="store_true", help="rebuild the index when a page changed")
+    rf.add_argument("--every", type=float, metavar="HOURS", help="scheduler: refresh now and then every HOURS (24)")
+    rf.add_argument("--trigger", action="store_true", help="maintainer trigger: make a running scheduler refresh now")
+    rf.set_defaults(fn=cmd_refresh)
     q = sub.add_parser("ask"); q.add_argument("question")
     q.add_argument("--scope", nargs="+", default=["public"], help="user scopes, e.g. public student")
     q.add_argument("--no-graph", action="store_true"); q.add_argument("--full", action="store_true")

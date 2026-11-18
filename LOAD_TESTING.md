@@ -16,10 +16,10 @@ The controller now queues requests when either concurrency limit is full, preser
 
 The AWS configuration now accepts the concurrency and queue settings below. Missing values keep the existing small-server defaults. This change does not raise the live limits automatically, change the model, grant document access or expose the internal `/metrics` endpoint.
 
-`/readyz` now includes `admission.limits` with the effective settings and `anonymous_rate_scope=shared`. Check this before a benchmark:
+`/readyz` includes `admission.limits` with the effective settings and `anonymous_rate_scope=shared` for an authorized operator (any key in a key-file deployment, an admin or staff key when guests are allowed); anonymous callers get liveness only. Check this before a benchmark:
 
 ```bash
-curl --fail --silent --show-error https://13.203.0.141/readyz | python3 -m json.tool
+curl --fail --silent --show-error -H "Authorization: Bearer $OPERATOR_KEY" https://13.203.0.141/readyz | python3 -m json.tool
 ```
 
 Interpret the response `reason`, not only HTTP 429:

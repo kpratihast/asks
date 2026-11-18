@@ -62,7 +62,7 @@ def is_course_code(code: str) -> bool:
 
 def parse_term(text: str) -> str | None:
     """'2026-AUG' | '2026-JAN' | '2019-SUM', from the START month and the first year mentioned."""
-    m = TERM_RE.search(text)
+    m = TERM_RE.search(norm(text))
     if not m:
         return None
     year = m.group(2) or m.group(4) or m.group(5)
@@ -96,16 +96,56 @@ class ParsedPage:
     boiler_lines: int = 0          # footer-phrase lines removed (diagnostics)
 
 
+MAX_TABLE_DEPTH = 8          # real pages nest tables 2-3 levels; deeper nesting is ignored (#58)
+
+
+def _own(node: Tag, names, *, stop=("table",)):
+    """Descendant tags named `names`, in document order, without descending into nested `stop` tags.
+    Bounded work per table, unlike find_all, which re-reads every nested table (#58)."""
+    out, stack = [], list(reversed([c for c in node.children if isinstance(c, Tag)]))
+    while stack:
+        tag = stack.pop()
+        if tag.name in names:
+            out.append(tag)
+        if tag.name not in stop:
+            stack.extend(reversed([c for c in tag.children if isinstance(c, Tag)]))
+    return out
+
+
+def _own_text(node: Tag) -> str:
+    """Like get_text(" ") but without the text of nested tables (those become rows of their own)."""
+    parts, stack = [], [node]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, Tag):
+            if item is node or item.name != "table":
+                stack.extend(reversed(list(item.children)))
+        elif type(item) is NavigableString or type(item).__name__ == "CData":
+            parts.append(str(item))
+    return " ".join(parts)
+
+
+def _tables(table: Tag) -> list[Tag]:
+    """This table and the tables nested in it, outermost first, up to MAX_TABLE_DEPTH levels."""
+    out, level = [], [table]
+    for _ in range(MAX_TABLE_DEPTH):
+        if not level:
+            break
+        out.extend(level)
+        level = [t for tbl in level for t in _own(tbl, {"table"})]
+    return out
+
+
 def _table_rows(table: Tag) -> tuple[list[str], list[tuple[list[str], list[str]]]]:
     rows = []
-    for tr in table.find_all("tr"):
-        cells = [norm(c.get_text(" ")) for c in tr.find_all(["th", "td"])]
+    for tr in _own(table, {"tr"}):
+        cells = [norm(_own_text(c)) for c in _own(tr, {"th", "td"}, stop=("table", "th", "td"))]
         if any(cells):
-            rows.append((cells, [a["href"] for a in tr.find_all("a", href=True)]))
+            rows.append((cells, [a["href"] for a in _own(tr, {"a"}) if a.has_attr("href")]))
     if not rows:
         return [], []
     first = rows[0][0]
-    header = first if (table.find("th") is not None or any("course" in c.lower() for c in first)) else []
+    header = first if (_own(table, {"th"}) or any("course" in c.lower() for c in first)) else []
     return header, rows[1:] if header else rows
 
 
@@ -195,20 +235,21 @@ def parse_html(url: str, html: str | bytes, *, tagged_departments: bool = False)
                         validate_codes([owner])
                     set_heading(HEADINGS[ch.name], t, owner, node=ch)
             elif ch.name == "table":
-                header, rows = _table_rows(ch)
                 flush()
-                for cells, hrefs in rows:
-                    if header and len(header) == len(cells):
-                        text = "; ".join(f"{h}: {v}" for h, v in zip(header, cells) if v)
-                    else:
-                        text = " | ".join(cells)
-                    codes = course_codes(cells[0] if cells else "")
-                    label = (path[-1][1] if path else title) + (f" | {cells[0]}" if codes else "")
-                    sections.append(Section([h for _, h, _ in path[:-1]] + [label], text, term[0], "row",
-                                            course_codes=codes or course_codes(text), department=section_department(),
-                                            links=[(text, target) for href in hrefs if (target := page_key(href, url))
-                                                   and target != page_key(url)],
-                                            contacts=[text] if EMAIL.search(text) else []))
+                for table in _tables(ch):
+                    header, rows = _table_rows(table)
+                    for cells, hrefs in rows:
+                        if header and len(header) == len(cells):
+                            text = "; ".join(f"{h}: {v}" for h, v in zip(header, cells) if v)
+                        else:
+                            text = " | ".join(cells)
+                        codes = course_codes(cells[0] if cells else "")
+                        label = (path[-1][1] if path else title) + (f" | {cells[0]}" if codes else "")
+                        sections.append(Section([h for _, h, _ in path[:-1]] + [label], text, term[0], "row",
+                                                course_codes=codes or course_codes(text), department=section_department(),
+                                                links=[(text, target) for href in hrefs if (target := page_key(href, url))
+                                                       and target != page_key(url)],
+                                                contacts=[text] if EMAIL.search(text) else []))
             elif ch.name == "div" and ch.find("a", href=lambda href: href and href.lower().startswith("mailto:")):
                 # Some staff directories put a name link and an email in an inline card.
                 # Keeping the small card as one line preserves their relationship.

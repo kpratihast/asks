@@ -1,0 +1,13 @@
+# FR-1 scheduled refresh: conditional re-check of every source; changed pages are stored as new versions
+# (FR-3) and the index is rebuilt. Edit the three paths below for your installation (see INGESTION_REFRESH.md).
+[Unit]
+Description=Ask IISc source refresh (conditional re-check, versioned raw store, index rebuild)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/askiisc/asks
+Environment=ASKIISC_DATA_DIR=/opt/askiisc/asks/data/local
+ExecStart=/opt/askiisc/venv/bin/python -m askiisc_retrieval.cli refresh --ingest
+Nice=10

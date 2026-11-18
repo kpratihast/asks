@@ -62,6 +62,28 @@ class Retriever:
         self.audit_violations = 0                       # should stay 0 forever; surfaced in metrics
 
     # ------------------------------------------------------------------ public
+    def readiness(self) -> tuple[bool, str | None]:
+        """Can retrieval serve evidence now? (#45) Ready only when the active snapshot can be read, was built
+        with the configured query embedder, has active versions, and the index holds vectors for them.
+        Returns (ready, reason); `reason` names the first failed check."""
+        try:
+            snap = self.snapshots.active()
+        except Exception as exc:
+            return False, f"snapshot unavailable: {type(exc).__name__}: {exc}"
+        if snap.embedding_model != self.embedder.model_id:
+            return False, (f"embedding model mismatch: query embedder {self.embedder.model_id!r} != snapshot model "
+                           f"{snap.embedding_model!r} (rebuild the index or set ASKIISC_EMBED_MODEL to match)")
+        if not snap.active_version_ids:
+            return False, f"snapshot {snap.snapshot_id} has no active versions"
+        try:
+            count = getattr(self.store, "count_versions", None)
+            vectors = count(snap.active_version_ids) if count is not None else self.store.count()
+        except Exception as exc:
+            return False, f"vector store unavailable: {type(exc).__name__}: {exc}"
+        if not vectors:
+            return False, f"vector index holds no vectors for the {len(snap.active_version_ids)} active versions"
+        return True, None
+
     def retrieve(self, query: str, scopes: list[str], use_graph: bool = True,
                  use_rerank: bool = True) -> RetrievalResult:
         t0 = time.perf_counter()
@@ -76,6 +98,12 @@ class Retriever:
         if snap.embedding_model != self.embedder.model_id:
             raise EmbeddingModelMismatch(
                 f"query embedder {self.embedder.model_id!r} != snapshot model {snap.embedding_model!r}")
+        # FR-4: the graph in memory must be the one this snapshot was built with. After an in-place rebuild
+        # (new snapshot on disk, old graph loaded), answer vector-only and say so until the graph is reloaded.
+        graph_mismatch = bool(use_graph and snap.graph_sha256 and getattr(self.graph, "sha256", None)
+                              and snap.graph_sha256 != self.graph.sha256)
+        if graph_mismatch:
+            use_graph = False
         info = analyse(query, self.today_term)
         t = lap("analyse", t0)
 
@@ -233,6 +261,11 @@ class Retriever:
                 log.warning("degraded retrieval: %s", reason)
                 t = lap("graph", t)
 
+        if use_graph and getattr(self.graph, "unavailable", None):
+            degraded, reason = True, f"graph unavailable: {self.graph.unavailable}"
+        if graph_mismatch:
+            degraded, reason = True, "graph does not match the active snapshot (restart to load the new graph)"
+
         proof_passages, graph_proofs, connection_status = [], [], None
         if use_graph:
             from .connections import plan_for, resolve_connections
@@ -323,6 +356,8 @@ class Retriever:
         for c, s in hits:
             if c.academic_term is None:
                 timeless.append((c, s))
+                continue
+            if term_key(c.academic_term) == (-1, -1):
                 continue
             if info.term_is_explicit:
                 if c.academic_term == info.target_term:
@@ -517,6 +552,7 @@ class Retriever:
         for p in passages:
             c = p.chunk
             if (c.version_id in version_ids and c.access_scope in scopes and c.embedding_model == model
+                    and (c.academic_term is None or term_key(c.academic_term) != (-1, -1))
                     and (not departments or c.department in departments)):
                 ok.append(p)
             else:

@@ -1,6 +1,6 @@
 # Switching the local Llama server
 
-Run these commands from `askiisc-retrieval`:
+Run these commands from `asks`:
 
 ```bash
 ./model.sh 3b               # Llama 3.2 3B, BF16
@@ -71,7 +71,9 @@ The script waits for the exact requested checkpoint to appear at `/v1/models` be
 reporting readiness. Logs and selected-profile information are under `.local/model/`.
 If startup fails after the old server has stopped, inspect `./model.sh logs` and select
 another profile. A readiness timeout leaves the loading server available for inspection;
-`./model.sh stop` stops it.
+`./model.sh stop` stops it. A server that is stuck loading may not exit on Ctrl-C: if the
+graceful stop times out, `./model.sh stop --force` kills the managed model server's
+processes (only those under the managed `vllm` pane; other processes are never touched).
 
 ## Options
 
@@ -89,3 +91,22 @@ overrides it. The launcher uses `ASKIISC_PYTHON`, a project `.venv`, the saved
 Python's standard library plus the `tmux`, `lsof`, and `ps` commands. Checkpoint download
 uses `huggingface_hub` from the inference environment. First-time downloads require
 network access and sufficient disk space; offline mode uses cached files only.
+
+
+## Install vLLM-Metal
+
+Use the [upstream installer](https://docs.vllm.ai/projects/vllm-metal/en/latest/installation/) for Apple Silicon on macOS 15 or later. The launcher expects its environment at ~/.venv-vllm-metal. Download and review the installer before executing it.
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/vllm-project/vllm-metal/main/install.sh -o /tmp/vllm-metal-install.sh
+less /tmp/vllm-metal-install.sh
+bash /tmp/vllm-metal-install.sh --stable
+source ~/.venv-vllm-metal/bin/activate
+vllm serve --help
+~~~
+
+The memory fraction is passed to vLLM as `--gpu-memory-utilization` (the setting vLLM-Metal
+reads; its startup log shows `Paged attention: using --gpu-memory-utilization=<fraction>`).
+The older `VLLM_METAL_MEMORY_FRACTION` / `VLLM_METAL_USE_PAGED_ATTENTION` variables are ignored
+by current vLLM-Metal and are cleared from the environment. On a 16 GiB Mac with little free
+memory, lower the budget further with `--memory-fraction`, e.g. `./model.sh 3b-quantized --memory-fraction 0.2`.

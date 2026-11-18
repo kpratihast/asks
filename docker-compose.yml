@@ -2,6 +2,8 @@
 #   docker compose up -d qdrant                 # now
 #   docker compose --profile graph up -d neo4j  # phase 2 (graph store)
 # Ports bind to 127.0.0.1 only: nothing is reachable from outside your laptop.
+# Credentials are never stored here: docker compose reads NEO4J_PASSWORD from the git-ignored .env
+# (copy .env.example). Neo4j applies a password only when its volume is first created.
 # Named volumes (not folders) because Windows folder mounts are slow and unreliable for databases.
 name: askiisc-dev
 
@@ -18,7 +20,7 @@ services:
     profiles: [graph]
     ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
     environment:
-      NEO4J_AUTH: neo4j/askiisc-dev
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env (see .env.example)}"
       NEO4J_server_memory_heap_initial__size: 256m
       NEO4J_server_memory_heap_max__size: 512m
       NEO4J_server_memory_pagecache_size: 256m

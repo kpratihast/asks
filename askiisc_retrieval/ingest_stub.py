@@ -4,6 +4,8 @@ ingestion team's pipeline, which will write the same ChunkPayload records."""
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +24,8 @@ from .snapshot import JsonSnapshotProvider, Snapshot
 from .stores import Embedder, JsonGraphStore, QdrantStore
 from .graph_rules import GRAPH_RULES_VERSION, build_edges
 
+log = logging.getLogger("askiisc.ingest")
+
 
 @dataclass
 class PageInput:
@@ -33,6 +37,7 @@ class PageInput:
     active: bool = True           # False = indexed but superseded (tests version filtering)
     version_tag: str = ""         # distinguishes a synthetic older version of the same URL
     tagged_departments: bool = False  # opt in for reviewed, normalized institute pages
+    pdf_title: str = ""           # set for a crawled PDF: `html` holds the PDF bytes (FR-1)
 
 
 def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, graph_path: Path,
@@ -42,45 +47,80 @@ def build_index(pages: list[PageInput], embedder: Embedder, store: QdrantStore, 
             raise ValueError(f"Unknown access scope: {page.scope!r}")
     all_chunks: list[ChunkPayload] = []
     active: set[str] = set()
-    report = []
-    parsed_all = [parse_html(p.url, p.html, tagged_departments=p.tagged_departments) for p in pages]
-    template_removed = remove_template_sections(parsed_all)
-    for p, parsed in zip(pages, parsed_all):
-        body = "\n".join(s.text for s in parsed.sections)
-        if len(body) < MIN_CONTENT_CHARS:
-            report.append({"url": p.url, "status": f"NOT INDEXED: only {len(body)} chars of main content "
-                           "(the real content is probably in a linked PDF/iframe; tell the ingestion team)"})
-            continue
-        ownership = "|".join(f"{s.heading}:{s.department or p.department}" for s in parsed.sections)
-        links = json.dumps([s.links for s in parsed.sections], ensure_ascii=False)
-        version_id = h(f"{p.url}|{h(body)}|{p.version_tag}|scope:{p.scope}|{h(ownership)}|{h(links)}")
-        chunks = chunk_page(parsed, version_id=version_id, document_id=h(p.url, 12), scope=p.scope,
-                            doc_type=p.doc_type, department=p.department, embedding_model=embedder.model_id)
-        all_chunks.extend(chunks)
-        if p.active:
-            active.add(version_id)
-        from .query_analysis import term_key
-        terms = sorted({c.academic_term for c in chunks if c.academic_term}, key=term_key)
-        report.append({"url": p.url, "version_id": version_id, "active": p.active, "sections": len(parsed.sections),
-                       "chunks": len(chunks), "departments": sorted({c.department for c in chunks}), "terms": f"{terms[0]}..{terms[-1]} ({len(terms)})" if terms else "-"})
+    report, failures = [], []
 
-    print(f"Embedding {len(all_chunks)} chunks with {embedder.model_id} ...")
-    vectors = embedder.embed_documents([c.embedding_input() for c in all_chunks])
-    store.upsert(all_chunks, vectors)
+    def failed(p, exc):
+        # FR-2: a page whose parser raises is an extraction failure, logged with URL and reason; the
+        # rest of the corpus is still indexed and the failed page produces no chunk or graph edge.
+        reason = f"{type(exc).__name__}: {exc}"[:300]
+        failures.append({"url": p.url, "reason": reason})
+        report.append({"url": p.url, "status": f"EXTRACTION FAILED ({reason})"})
+        log.error("extraction failed: %s: %s", p.url, reason)
 
+    parsed_ok = []
+    for p in pages:
+        try:
+            html = p.html
+            if p.pdf_title:                       # a crawled PDF goes through the PDF extractor (FR-1)
+                from .admissions import pdf_html
+                html = pdf_html(p.html, p.pdf_title, max_pages=32)
+            parsed_ok.append((p, parse_html(p.url, html, tagged_departments=p.tagged_departments)))
+        except Exception as exc:
+            failed(p, exc)
+    template_removed = remove_template_sections([parsed for _, parsed in parsed_ok])
+    for p, parsed in parsed_ok:
+        try:
+            body = "\n".join(s.text for s in parsed.sections)
+            if len(body) < MIN_CONTENT_CHARS:
+                report.append({"url": p.url, "status": f"NOT INDEXED: only {len(body)} chars of main content "
+                               "(the real content is probably in a linked PDF/iframe; tell the ingestion team)"})
+                continue
+            ownership = "|".join(f"{s.heading}:{s.department or p.department}" for s in parsed.sections)
+            links = json.dumps([s.links for s in parsed.sections], ensure_ascii=False)
+            version_id = h(f"{p.url}|{h(body)}|{p.version_tag}|scope:{p.scope}|{h(ownership)}|{h(links)}")
+            chunks = chunk_page(parsed, version_id=version_id, document_id=h(p.url, 12), scope=p.scope,
+                                doc_type=p.doc_type, department=p.department, embedding_model=embedder.model_id)
+            from .query_analysis import term_key
+            terms = sorted({c.academic_term for c in chunks if c.academic_term}, key=term_key)
+            report.append({"url": p.url, "version_id": version_id, "active": p.active, "sections": len(parsed.sections),
+                           "chunks": len(chunks), "departments": sorted({c.department for c in chunks}), "terms": f"{terms[0]}..{terms[-1]} ({len(terms)})" if terms else "-"})
+            all_chunks.extend(chunks)          # only once the whole page has been processed
+            if p.active:
+                active.add(version_id)
+        except Exception as exc:
+            failed(p, exc)
+
+    if not active:
+        # Nothing indexable: keep the previous snapshot rather than activating an empty corpus (FR-4).
+        raise RuntimeError(f"no page could be indexed ({len(failures)} extraction failures); "
+                           "the previous snapshot is still active")
+    # FR-3: a page whose version did not change keeps its stored vectors; only new or changed chunks are
+    # embedded and written (an unchanged corpus re-embeds nothing).
+    unchanged = store.unchanged_chunk_ids(all_chunks) if hasattr(store, "unchanged_chunk_ids") else set()
+    todo = [c for c in all_chunks if c.chunk_id not in unchanged]
+    print(f"Embedding {len(todo)} of {len(all_chunks)} chunks with {embedder.model_id} "
+          f"({len(all_chunks) - len(todo)} unchanged chunks keep their stored vectors) ...")
+    if todo:
+        vectors = embedder.embed_documents([c.embedding_input() for c in todo])
+        store.upsert(todo, vectors)
+
+    # Activation order (FR-4): new vectors are added alongside the old ones, then the graph and chunk
+    # list are replaced atomically, and the snapshot - which names the graph by hash - is replaced last.
+    # Until that final rename, readers keep the previous snapshot, its versions and its graph.
+    from .snapshot import atomic_write_text
     graph = JsonGraphStore(build_edges(all_chunks))
-    graph.save(graph_path)
+    graph_sha256 = graph.save(graph_path)
+    if chunks_path:
+        atomic_write_text(chunks_path, "".join(json.dumps(c.to_dict(), ensure_ascii=False) + "\n" for c in all_chunks))
     snap = Snapshot(snapshot_id="snap-" + h("|".join(sorted(active)) + embedder.model_id + GRAPH_RULES_VERSION, 10),
                     embedding_model=embedder.model_id, graph_version=GRAPH_RULES_VERSION,
                     active_version_ids=frozenset(active),
-                    departments=tuple(sorted({c.department for c in all_chunks if c.version_id in active})))
+                    departments=tuple(sorted({c.department for c in all_chunks if c.version_id in active})),
+                    graph_sha256=graph_sha256)
     JsonSnapshotProvider.write(snapshot_path, snap)
-    if chunks_path:
-        with chunks_path.open("w", encoding="utf-8") as f:
-            for c in all_chunks:
-                f.write(json.dumps(c.to_dict(), ensure_ascii=False) + "\n")
     untermed = [c.section_heading for c in all_chunks if c.doc_type == "schedule" and c.academic_term is None]
-    return {"pages": report, "chunks": len(all_chunks), "edges": len(graph.edges), "snapshot": snap.snapshot_id,
+    return {"pages": report, "failures": failures, "built_versions": sorted({c.version_id for c in all_chunks}),
+            "chunks": len(all_chunks), "embedded": len(todo), "edges": len(graph.edges), "snapshot": snap.snapshot_id,
             "untermed_schedule": untermed, "template_removed": template_removed}
 
 
@@ -128,7 +168,12 @@ def load_page_inputs(include_fixtures: bool = True) -> list[PageInput]:
             owner = next((hosts[root] for root in sorted(hosts, key=len, reverse=True)
                           if host == root or host.endswith("." + root)), None)
             if owner and pg.get("department", owner) == owner:
-                pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], "public", owner))
+                title = ""
+                if pg.get("format") == "pdf":
+                    from urllib.parse import unquote
+                    stem = unquote(urlsplit(pg["url"]).path.rstrip("/").rsplit("/", 1)[-1]).rsplit(".", 1)[0]
+                    title = re.sub(r"[-_]+", " ", stem).strip() or "PDF document"
+                pages.append(PageInput(pg["url"], f.read_bytes(), pg["doc_type"], "public", owner, pdf_title=title))
     from .linked_fetch import INDEX
     linked_index = RAW_DIR / INDEX
     if linked_index.is_file():

@@ -82,7 +82,7 @@ def test_http_c20_q10_burst_admits_twenty_queues_ten_and_rejects_one():
                           rate_per_min=100,tenant_concurrency=20,tenant_queue=10,global_concurrency=20,queue_wait_s=2)
         async with httpx.AsyncClient(transport=httpx.MockTransport(model)) as upstream:
             app=create_app(settings,retrieval=FakeRetrieval(),generator=Generator(settings,client=upstream))
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://testserver') as client:
                 tasks=[asyncio.create_task(client.post('/v1/ask',json={'question':'Who teaches DS 252?'})) for _ in range(31)]
                 try:
                     await asyncio.wait_for(started.wait(),2)
@@ -99,10 +99,11 @@ def test_http_c20_q10_burst_admits_twenty_queues_ten_and_rejects_one():
                 denied=next(r for r in results if r.status_code==429)
                 assert denied.json()['reason']=='tenant_queue_full' and int(denied.headers['retry-after'])>=1
                 assert all(r.json()['status']=='answered' for r in results if r.status_code==200)
-                state=(await client.get('/readyz')).json()['admission']
+                state=app.state.admission.snapshot()
                 assert state['global_active']==0 and state['tenants']['public']['waiting']==0
                 assert state['limits']['tenant_concurrency']==20 and state['limits']['tenant_queue']==10
-                assert (await client.get('/readyz')).json()['anonymous_rate_scope']=='shared'
+                ready=(await client.get('/readyz')).json()      # anonymous: liveness only
+                assert ready['retrieval'] and 'admission' not in ready
     asyncio.run(check())
 
 

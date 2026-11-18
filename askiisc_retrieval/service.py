@@ -141,6 +141,11 @@ class RetrieveIn(BaseModel):
     context_chars: int | None = 6000            # prompt budget; lowest-ranked sources dropped first
 
 
+class SourceIn(BaseModel):
+    chunk_id: str = Field(min_length=1, max_length=128)
+    scopes: list[str] = ["public"]
+
+
 class VerifyIn(BaseModel):
     answer: str
     markers: list[str]                          # the citation markers /retrieve returned
@@ -163,14 +168,17 @@ def create_app(retriever=None, service_key=None):
             state["r"] = build_retriever()
         return state["r"]
 
-    @app.post("/retrieve")
-    def retrieve(body: RetrieveIn, authorization: str | None = Header(default=None)):
-        bad = [s for s in body.scopes if s not in SCOPES]
+    def check_scopes(scopes, authorization):
+        bad = [s for s in scopes if s not in SCOPES]
         if bad:
             raise HTTPException(422, f"unknown scopes {bad}; allowed {list(SCOPES)}")
-        if set(body.scopes) - {"public"}:
+        if set(scopes) - {"public"}:
             if not service_key or not hmac.compare_digest((authorization or "").encode("utf-8"), ("Bearer " + service_key).encode("utf-8")):
                 raise HTTPException(403, "Restricted retrieval requires the gateway service credential")
+
+    @app.post("/retrieve")
+    def retrieve(body: RetrieveIn, authorization: str | None = Header(default=None)):
+        check_scopes(body.scopes, authorization)
         t = time.perf_counter()
         try:
             res = r().retrieve(body.question, body.scopes, use_graph=body.use_graph, use_rerank=body.use_rerank)
@@ -182,6 +190,20 @@ def create_app(retriever=None, service_key=None):
         out["sources_text"] = render_sources(res)
         out["timings_ms"]["service"] = round((time.perf_counter() - t) * 1000, 1)
         return out
+
+    @app.post("/source")
+    def source(body: SourceIn, authorization: str | None = Header(default=None)):
+        """Resolve one citation's chunk in the active snapshot (FR-12), with the same scope rule as /retrieve."""
+        from .citations import chunk_source
+        check_scopes(body.scopes, authorization)
+        try:
+            src = chunk_source(r(), body.chunk_id, body.scopes)
+        except Exception:
+            log.exception("source lookup failed")
+            raise HTTPException(503, "Retrieval is temporarily unavailable")
+        if src is None:
+            raise HTTPException(404, "no such source in the active snapshot for these scopes")
+        return src
 
     @app.post("/verify")
     def verify(body: VerifyIn):
@@ -206,12 +228,16 @@ def create_app(retriever=None, service_key=None):
             info["store"] = getattr(rt.store, "backend", "?")
             if hasattr(rt.store, "stats"):
                 info["adapter"] = vars(rt.store.stats)
-            info["status"] = "ok"
+            ok, reason = rt.readiness()                      # #45: the gateway's /readyz follows this status
+            info["status"] = "ok" if ok else "not_ready"
+            if reason:
+                info["error"] = reason
         except Exception as e:
             info["status"], info["error"] = "down", f"{type(e).__name__}: {e}"
         g = rt.graph
         info["graph"] = None if g is None else {"edges": len(g.edges), **getattr(g, "stats", {}),
                                                 "error": getattr(g, "error", None)}
-        return info
+        from fastapi.responses import JSONResponse
+        return JSONResponse(info, status_code=200 if info["status"] == "ok" else 503)
 
     return app

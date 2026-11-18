@@ -9,6 +9,7 @@
 | Graph construction | `askiisc_retrieval/link_graph.py`, `graph_rules.py`, `connections.py`, `policy_graph.py` | Add edges from actual page links and supported facts. Keep the passage that supports each edge. |
 | Search | `askiisc_retrieval/retriever.py`, `stores.py`, `ingestion_adapter.py` | Search active, authorized passages. Add bounded graph evidence when it helps answer the question. |
 | API and chat | `askiisc_serving/app.py`, `generator.py`, `evidence_selection.py`, `static/index.html` | Receive requests, fit evidence into the model prompt, check citations and show answers. |
+| Answer grounding | `askiisc_serving/grounding.py` | Check each cited claim against its passages (numbers, names, terms), remove unsupported claims, turn padded refusals into refusals and self-contradictions into source excerpts. |
 | Accounts and access | `askiisc_serving/email_auth.py`, `auth.py`, `security.py`, `askiisc_retrieval/private_documents.py` | Verify OTP, set roles on the server, and check access before returning passages, graph paths or files. |
 | Operations | `tools/`, `deploy/aws/`, `bench/` | Build and inspect indexes, run comparisons and package releases. |
 

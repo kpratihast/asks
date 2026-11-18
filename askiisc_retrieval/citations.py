@@ -124,3 +124,15 @@ def result_to_dict(result: RetrievalResult, include_text: bool = True) -> dict:
                      for p in result.passages],
         "timings_ms": result.timings_ms,
     }
+
+
+def chunk_source(retriever, chunk_id: str, scopes: list[str]) -> dict | None:
+    """One chunk of the active snapshot, if the caller's scopes allow it (shared by the local client and
+    the retrieval service's /source route)."""
+    snap = retriever.snapshots.active()
+    for c in retriever.store.get([chunk_id]):
+        if c.version_id in snap.active_version_ids and c.access_scope in scopes:
+            return {"chunk_id": c.chunk_id, "title": c.title, "section": c.section_heading,
+                    "url": c.source_url, "version_id": c.version_id, "academic_term": c.academic_term,
+                    "text": c.text, "access_scope": c.access_scope}
+    return None

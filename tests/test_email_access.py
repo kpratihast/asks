@@ -216,7 +216,12 @@ def test_sources_and_original_files_cannot_bypass_login(stack, auth):
     for x in protected: assert c.get('/v1/sources/' + x.chunk_id).status_code == 404
     assert c.get('/v1/documents/student-course-schedule-ad2026').status_code == 401
     assert c.get('/v1/documents/faculty-exam-timetable-ad2026').status_code == 401
+    # #13: an unknown id looks the same as a restricted one before sign-in (no manifest enumeration)
+    missing = c.get('/v1/documents/this-does-not-exist')
+    existing = c.get('/v1/documents/student-course-schedule-ad2026')
+    assert missing.status_code == existing.status_code == 401 and missing.json() == existing.json()
     otp_login(c, auth, 'student@iisc.ac.in')
+    assert c.get('/v1/documents/this-does-not-exist').status_code == 404
     assert c.get('/v1/documents/faculty-exam-timetable-ad2026').status_code == 403
     for x in protected:
         response = c.get('/v1/sources/' + x.chunk_id)
@@ -374,7 +379,8 @@ def test_disabled_flag_ignores_sessions_and_privileged_keys_and_never_sends_or_v
     # Disabled mode must not need a faculty directory or SMTP configuration at startup.
     monkeypatch.setenv('FACULTY_DIRECTORY', str(tmp_path/'missing.json'))
     sent = len(auth.mailer.messages)
-    settings = Settings(public_chat=False, email_auth_enabled=False, served_model='test-model', keys_file=tmp_path/'missing-keys.yaml')
+    # Anonymous chat must now be enabled explicitly (FR-6); a forged bearer is rejected, never ignored.
+    settings = Settings(public_chat=True, email_auth_enabled=False, served_model='test-model', keys_file=None)
     model = FakeModel('Public answer [S1].')
     generator = Generator(settings, client=httpx.AsyncClient(transport=httpx.MockTransport(model.handler)))
     from unittest.mock import patch
@@ -389,15 +395,18 @@ def test_disabled_flag_ignores_sessions_and_privileged_keys_and_never_sends_or_v
         assert off.get('/ui-config').json()['email_delivery_ready'] is False
         assert off.post('/auth/request-otp',json={'email':'simmhan@iisc.ac.in'}).status_code==404
         assert off.post('/auth/verify-otp',json={'challenge_id':challenge['challenge_id'],'code':'000000'}).status_code==404
-        # Even a previously valid professor session and forged privileged bearer cannot widen access.
-        for headers in [{}, {'Authorization':'Bearer faculty-key-0123456789'}]:
-            public = off.post('/v1/ask',json={'question':'Who teaches DS252?'},headers=headers)
-            assert public.status_code==200 and 'SECRET' not in public.text
-            denied = off.post('/v1/ask',json={'question':'Show the final examination timetable'},headers=headers)
-            assert denied.status_code==403 and denied.json()['email_login'] is False
-            assert denied.json()['login_required'] is False and not denied.json()['citations']
-            assert off.post('/v1/ask',json={'question':'q','mode':'none'},headers=headers).status_code==403
-            assert off.get('/v1/documents/faculty-exam-timetable-ad2026',headers=headers).status_code==403
+        # A previously valid professor session cannot widen access.
+        public = off.post('/v1/ask',json={'question':'Who teaches DS252?'})
+        assert public.status_code==200 and 'SECRET' not in public.text
+        denied = off.post('/v1/ask',json={'question':'Show the final examination timetable'})
+        assert denied.status_code==403 and denied.json()['email_login'] is False
+        assert denied.json()['login_required'] is False and not denied.json()['citations']
+        assert off.post('/v1/ask',json={'question':'q','mode':'none'}).status_code==403
+        assert off.get('/v1/documents/faculty-exam-timetable-ad2026').status_code==403
+        # A forged privileged bearer is rejected outright (FR-6), not silently downgraded to guest.
+        forged = {'Authorization':'Bearer faculty-key-0123456789'}
+        assert off.post('/v1/ask',json={'question':'Who teaches DS252?'},headers=forged).status_code==401
+        assert off.get('/v1/documents/faculty-exam-timetable-ad2026',headers=forged).status_code==401
         assert all('SECRET' not in json.dumps(req) for req in model.requests)
         assert len(auth.mailer.messages)==sent
         assert off.post('/auth/logout').status_code==200

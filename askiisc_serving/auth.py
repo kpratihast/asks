@@ -53,6 +53,18 @@ class Scope:
     academic_year: str | None
 
 
+def _published_keys() -> frozenset[str]:
+    """Keys shipped in the repository's example file; never valid credentials."""
+    example = Path(__file__).resolve().parents[1] / "serving_keys.example.yaml"
+    try:
+        return frozenset((yaml.safe_load(example.read_text(encoding="utf-8")) or {}).get("keys", {}))
+    except (OSError, yaml.YAMLError):
+        return frozenset()
+
+
+PUBLISHED_KEYS = _published_keys()
+
+
 class KeyStore:
     def __init__(self, keys: dict[str, dict]):
         self._keys: dict[str, Principal] = {}
@@ -61,8 +73,14 @@ class KeyStore:
             if role not in ROLE_SCOPES:
                 raise ValueError(f"unknown role {role!r} for tenant {v.get('tenant')}; "
                                  f"use one of {sorted(ROLE_SCOPES)}")
+            if k.lower().startswith(("replace-", "changeme", "your-api-key", "<")):
+                raise ValueError("Replace example placeholder keys with newly generated secrets")
             if len(k) < 16:
                 raise ValueError("API keys must be at least 16 characters")
+            if k in PUBLISHED_KEYS or "replace-with" in k.lower():
+                # A key printed in the public repository is not a secret (red-team finding, Cloudhack).
+                raise ValueError(f"tenant {v.get('tenant')}: this is a placeholder key from serving_keys.example.yaml; "
+                                 "generate real keys with `python tools/make_keys.py serving_keys.yaml`")
             self._keys[k] = Principal(f"{v.get('tenant', 'default')}#{i}", v.get("tenant", "default"), role)
 
     @classmethod
