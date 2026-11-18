@@ -200,7 +200,20 @@ class RemoteRetrieval:
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         if mode == "none":
-            return [], {"mode": mode, "snapshot_id": None, "evidence_sufficient": None, "timings_ms": {}}
+            # Parity with LocalRetrieval.run: a pinned snapshot must be validated even when no
+            # retrieval call is made, so a stale/invalid pin on a Baseline-B0 (mode="none") run
+            # is not silently accepted (#52).
+            snap = None
+            if pinned:
+                try:
+                    h = await self.c.get(self.url + "/health")
+                    h.raise_for_status()
+                    snap = h.json().get("snapshot", {}).get("id")
+                except Exception as exc:
+                    raise RetrievalUnavailable(f"Snapshot unavailable: {type(exc).__name__}") from exc
+                if snap != pinned:
+                    raise SnapshotMismatch(f"pinned snapshot {pinned} is not active (active: {snap})")
+            return [], {"mode": mode, "snapshot_id": snap, "evidence_sufficient": None, "timings_ms": {}}
         try:
             r = await self.c.post(self.url + "/retrieve", headers={"Authorization": "Bearer " + self.service_key} if self.service_key else {},
                                   json={"question": question, "scopes": list(scopes),
