@@ -1,6 +1,7 @@
 """Paths and tunables. Everything lives under the project folder so the setup is portable."""
 from __future__ import annotations
 
+import math
 import os
 from datetime import date
 from pathlib import Path
@@ -53,7 +54,15 @@ RERANK_MAX_LEN = int(os.environ.get("ASKIISC_RERANK_MAX_LEN", "384"))
 # Set a hard floor only after calibrating on the deployed corpus and reranker.
 # Without one, reranking changes the order and serving decides whether the evidence answers the question.
 _RMIN = os.environ.get("ASKIISC_RERANK_MIN", "none")
-RERANK_MIN = None if _RMIN.lower() == "none" else float(_RMIN)
+if _RMIN.lower() == "none":
+    RERANK_MIN = None
+else:
+    RERANK_MIN = float(_RMIN)
+    if not math.isfinite(RERANK_MIN):
+        # #54: nan/inf silently passed `float()`; `top >= nan` is False for every query, so the
+        # sufficiency gate would abstain on all answerable questions with no indication the
+        # threshold itself was bad. Fail fast at config load instead.
+        raise ValueError(f"ASKIISC_RERANK_MIN must be a finite number or 'none', got {_RMIN!r}")
 DEVICE = os.environ.get("ASKIISC_DEVICE")    # "cuda" / "cpu"; default: cuda if available
 
 # Backend: "stub" = the laptop stand-in (fetch/ingest in this repo); "ingestion" = the ingestion team's

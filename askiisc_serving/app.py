@@ -260,12 +260,16 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
         if p is None:
             return _error(401, "missing or invalid API key")
         if q.mode not in MODES:
+            app.state.metrics.reject(422, "invalid_mode", p.tenant)
             return _error(422, f"mode must be one of {list(MODES)}")
         if not q.question.strip():
+            app.state.metrics.reject(422, "empty_question", p.tenant)
             return _error(422, "question must contain text")
         if (not authorization or not s.email_auth_enabled) and q.mode == "none":
+            app.state.metrics.reject(403, "mode_none_requires_auth", p.tenant)
             return _error(403, "Public chat requires document retrieval")
         if len(q.question) > s.max_question_chars:
+            app.state.metrics.reject(422, "question_too_long", p.tenant)
             return _error(422, f"question longer than {s.max_question_chars} characters")
         previous_question = context_question(q.question, q.history)
         gate_question = " ".join(filter(None, [previous_question, q.question]))
