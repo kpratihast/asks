@@ -22,7 +22,7 @@ Important limits
 - #3 and #4 remain partial because lexical overlap cannot demonstrate zero unsupported semantic claims or a 100% live-model refusal invariant.
 - #15 still needs concurrent-writer and cross-store activation work.
 - #26 streams one checked sentence at a time; only text that passed the per-sentence claim check is sent before the whole-answer checks.
-- #44 needs measured E4/E6, stale-version, GPU-hour and cost results. Historical report figures have not been replaced with invented results.
+- #44: measured stale-version, E4 and E6 results and GPU-hours are in REPORT_ERRATA.md. A cost figure still needs the GPU hourly price. Historical report figures have not been replaced with invented results.
 
 Changes requiring review
 
@@ -67,7 +67,7 @@ The strict local launcher can create a private guest key. The example local prof
 | [#41](https://github.com/kpratihast/asks/issues/41) | Implemented | Empty logout requests work without Content-Length and with chunked framing. Nonempty non-JSON bodies still fail. |
 | [#42](https://github.com/kpratihast/asks/issues/42) | Implemented | Non-rate admission failure/cancellation refunds the taken rate token. Queue-full retry and concurrency regressions pass. |
 | [#43](https://github.com/kpratihast/asks/issues/43) | Implemented | B0 requires both an explicit ALLOW_NO_RETRIEVAL flag and an admin bearer key. Guest credentials remain denied. |
-| [#44](https://github.com/kpratihast/asks/issues/44) | Partial; evaluation/report work remaining | Added B1 8B and AWQ launch variants. GPU runbook identifies failed invariants and required E4/E6/cost evidence. Historical PDF results and held-out taxonomy remain unchanged pending fresh measured evidence. |
+| [#44](https://github.com/kpratihast/asks/issues/44) | Implemented (cost needs the GPU hourly price) | Stale-version set `test_stale12.yaml` with `tools/eval_stale.py` (0 superseded passages), E4 `tools/eval_e4.py` (also fixed a duplicate fetch of pages that are both listed and crawled), E6 `tools/eval_e6.py` (generation and graph outage), GPU-hours from Tables 8 and 18, abstention verdict corrected to Fail, B1 8B/AWQ launch variants. Measured results in REPORT_ERRATA.md; the held-out `test_cds120.yaml` is unchanged. |
 
 Upstream verification
 
