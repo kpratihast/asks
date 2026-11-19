@@ -7,7 +7,7 @@ top. Tested end to end with that `pipeline.py` (`tests/test_e2e_smit_pipeline.py
 Folders assumed (adjust the paths):
 
 ```
-...\Capstone Project\askiisc-retrieval     this repo (retrieval + serving)
+...\Capstone Project\asks                  this repo (retrieval + serving)
 ...\Capstone Project\ingestion             ingestion v3 (pipeline.py, docker-compose.yml, .env, ...)
 ```
 
@@ -81,7 +81,7 @@ replaces changed ones safely (new version written first, then activated, then th
 ## 4. Point retrieval at the stores and check them
 
 ```powershell
-cd "..\askiisc-retrieval"
+cd "..\asks"
 $env:ASKIISC_BACKEND  = "ingestion"
 $env:ASKIISC_ENV_FILE = "..\ingestion\.env"     # same credentials file as ingestion; nothing retyped
 python -m askiisc_retrieval.cli check-ingestion
@@ -147,7 +147,7 @@ python -m askiisc_serving --port 8100
 Second window:
 
 ```powershell
-cd "...\askiisc-retrieval"; conda activate askiisc
+cd "...\asks"; conda activate askiisc
 python tools/check_serving.py                      # now defaults to http://127.0.0.1:8100
 ```
 

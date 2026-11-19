@@ -4,7 +4,7 @@ Ask questions about IISc courses, admissions and academic policies. Answers cite
 
 ## Install and run
 
-Use Python 3.11 or 3.12, Git and a model server that exposes the OpenAI-compatible `/v1/models` and `/v1/chat/completions` endpoints. The app uses Qdrant in a local folder by default. The first index build downloads a sentence embedding model.
+Use Python 3.12 (the version CI tests and the EC2 host runs; other versions are untested), Git and a model server that exposes the OpenAI-compatible `/v1/models` and `/v1/chat/completions` endpoints. The app uses Qdrant in a local folder by default. The first index build downloads a sentence embedding model.
 
 ```bash
 git clone https://github.com/kpratihast/asks.git

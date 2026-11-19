@@ -3,8 +3,8 @@
 Run a frozen graph ablation against the existing local MLX model:
 
 ```bash
-cd /Users/kshitij/mvps/askiisc/askiisc-retrieval
-/Users/kshitij/Desktop/askiisc/.venv/bin/python tools/compare_graph.py \
+cd asks    # the cloned repository folder
+.venv/bin/python tools/compare_graph.py \
   --out output/graph-comparison/my-run
 ```
 
@@ -38,7 +38,7 @@ Outputs:
 The automatic rubric checks expected answer patterns and abstention status. It does not detect all unsupported claims, incorrect logical qualifiers, or citation-placement errors. Review the actual answer against its cited excerpts before calling this semantic accuracy. Record `correct`, `supported` and `note` under keys such as `R01/graph_equal` in `review.json`, then rebuild reports without inference:
 
 ```bash
-/Users/kshitij/Desktop/askiisc/.venv/bin/python tools/compare_graph.py \
+.venv/bin/python tools/compare_graph.py \
   --out output/graph-comparison/my-run --report-only
 ```
 
