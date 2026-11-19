@@ -39,7 +39,7 @@ from .conversation import HELP_REPLY, guidance_reason, context_question, valid_r
 from .metrics import Metrics
 from .retrieval_client import MODES, RetrievalMisconfigured, RetrievalUnavailable, SnapshotMismatch
 from .settings import Settings
-from .security import RequestGuard, instruction_attack, evidence_instruction_attack, audit_evidence, knowledge_override
+from .security import RequestGuard, guard_limits, instruction_attack, evidence_instruction_attack, audit_evidence, knowledge_override
 
 
 class OTPRequest(BaseModel):
@@ -171,6 +171,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                   docs_url=None if public else '/docs', redoc_url=None if public else '/redoc',
                   openapi_url=None if public else '/openapi.json')
     app.add_middleware(RequestGuard)
+    app.state.request_guard_limits = guard_limits()       # validates GUARD_* at startup (#55)
     app.state.settings, app.state.keys, app.state.retrieval, app.state.generator = s, keys, retrieval, generator
     app.state.admission = Admission(s.rate_per_min, s.tenant_concurrency, s.tenant_queue, s.queue_wait_s,
                                     s.global_concurrency)
@@ -528,6 +529,7 @@ def create_app(settings: Settings | None = None, retrieval=None, generator=None,
                 "model_endpoint": g_ok, "model": s.served_model, "degraded": not graph.get("available", True)}
         if await operator(authorization, request):
             body.update({"admission": app.state.admission.snapshot(), "anonymous_rate_scope": "shared",
+                         "request_guard": app.state.request_guard_limits,
                          "model_info": getattr(app.state.generator, "identity", None),
                          "retrieval_reason": ready_cache.get("reason"),
                          "graph": graph})          # degraded (vector-only) but still ready

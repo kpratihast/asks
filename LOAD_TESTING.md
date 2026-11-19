@@ -30,6 +30,26 @@ Interpret the response `reason`, not only HTTP 429:
 | `tenant_queue_full` | This tenant already has its allowed number of waiters | Expected load shedding beyond admitted capacity plus Q. |
 | `queue_timeout` | A queued request waited longer than `QUEUE_WAIT_S` | Measure service time and queue delay before increasing the timeout. |
 | `server_busy` | Global limit reached with queuing disabled | Check `TENANT_QUEUE` and the global limit. |
+| `address_rate_limited` | Pre-authentication request guard: this client address (below) | Spread load over several addresses or raise `GUARD_PER_ADDRESS_PER_MIN` for the controlled test. |
+| `all_addresses_rate_limited` | Pre-authentication request guard: bucket shared by every address | Raise `GUARD_ALL_ADDRESSES_PER_MIN` for the controlled test. |
+| `request_bodies_busy` | 64 request bodies were already being read | Usually slow or stalled clients; check the client side. |
+
+## Pre-authentication request guard
+
+Before authentication and admission control, `RequestGuard` (`askiisc_serving/security.py`) applies token buckets that start full and refill continuously. They count every request, including `/healthz`, `/readyz` and requests that admission control later rejects, and they apply per client address as the gateway sees it (behind the AWS Caddy proxy, the real client address; on a local run, the load generator's address).
+
+| Bucket | Default | Setting | Applies to |
+| --- | --- | --- | --- |
+| Per address | 180 requests/min (burst 180, then 3/s) | `GUARD_PER_ADDRESS_PER_MIN` | every path except the two OTP endpoints |
+| All addresses together | 1,200 requests/min | `GUARD_ALL_ADDRESSES_PER_MIN` | the same paths |
+| OTP request | 10 per address, 60 in total, per minute | fixed | `/auth/request-otp` |
+| OTP verify | 30 per address, 120 in total, per minute | fixed | `/auth/verify-otp` |
+
+A guard rejection is HTTP 429 with `Retry-After` and a body such as `{"error": "Too many requests. Try again later.", "reason": "address_rate_limited", "limiter": "request_guard", "retry_after_s": 1}`. It is written to the same per-request log (`rejected:address_rate_limited`) and `/metrics` counters as admission rejections. Operators see the effective values under `request_guard` in `/readyz`.
+
+One load-generator address can therefore send at most 180 + 3 × (seconds − 60) requests over a run longer than a minute, about 3.3 requests/s over 10 minutes, whatever `RATE_PER_MIN`, C, Q and G are. For a throughput or concurrency benchmark (E1, E2), either generate load from several addresses or set `GUARD_PER_ADDRESS_PER_MIN` above the offered load (for example `6000`) for that run, and record the value with the results. Keep the defaults for ordinary traffic. Count 429s by `reason`: guard rejections are not admission-control load shedding.
+
+The project report's E2 statement that 429s first appeared at 30 users is not reproducible from the documented defaults; see [REPORT_ERRATA.md](REPORT_ERRATA.md).
 
 ## Controlled C=20 / Q=10 profile
 

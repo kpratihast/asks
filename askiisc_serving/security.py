@@ -5,6 +5,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import math
 import os
 import posixpath
@@ -18,6 +19,35 @@ from urllib.parse import unquote, urlsplit
 import anyio
 
 from starlette.responses import JSONResponse
+
+
+def _positive_int(name, default):
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == '':
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f'{name} must be a positive integer, got {raw!r}') from None
+    if value < 1:
+        raise ValueError(f'{name} must be a positive integer, got {raw!r}')
+    return value
+
+
+def guard_limits() -> dict:
+    """Pre-authentication limits of RequestGuard, in requests per minute (token buckets that start full).
+
+    These run before the per-key admission controller (RATE_PER_MIN, C, Q, W, G) and apply per client
+    address as the gateway sees it, plus one bucket shared by all addresses. Reported by /readyz to
+    operators and documented in LOAD_TESTING.md (#55)."""
+    return {
+        'http': {'per_address_per_min': _positive_int('GUARD_PER_ADDRESS_PER_MIN', 180),
+                 'all_addresses_per_min': _positive_int('GUARD_ALL_ADDRESSES_PER_MIN', 1200),
+                 'applies_to': 'every path except /auth/request-otp and /auth/verify-otp'},
+        'otp': {'per_address_per_min': 10, 'all_addresses_per_min': 60, 'applies_to': '/auth/request-otp'},
+        'verify': {'per_address_per_min': 30, 'all_addresses_per_min': 120, 'applies_to': '/auth/verify-otp'},
+        'max_concurrent_body_reads': 64,
+    }
 
 
 class RequestGuard:
@@ -36,6 +66,7 @@ class RequestGuard:
         self.buckets = OrderedDict()
         self.global_buckets = {}
         self.readers = 0
+        self.limits = guard_limits()
         # Hash the exact bytes FileResponse serves (UTF-8, no newline translation) on every OS.
         html = (Path(__file__).parent / 'static/index.html').read_bytes().decode('utf-8')
         hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode('utf-8')).digest()).decode() + "'"
@@ -59,19 +90,35 @@ class RequestGuard:
         table[key] = (tokens-1 if not wait else tokens, now)
         return wait
 
-    def throttle(self, peer, path):
+    def check(self, peer, path):
+        """(seconds to wait, reason); wait 0 means allowed. Reasons: all_addresses_rate_limited
+        (bucket shared by every address) or address_rate_limited (this client address)."""
         group = 'otp' if path == '/auth/request-otp' else 'verify' if path == '/auth/verify-otp' else 'http'
-        per_peer, global_limit = {'otp': (10, 60), 'verify': (30, 120), 'http': (180, 1200)}[group]
+        per_peer = self.limits[group]['per_address_per_min']
+        global_limit = self.limits[group]['all_addresses_per_min']
         now = time.monotonic()
         wait = self.take(self.global_buckets, group, global_limit, now)
         if wait:
-            return wait
+            return wait, 'all_addresses_rate_limited'
         key = (peer, group)
         wait = self.take(self.buckets, key, per_peer, now)
         self.buckets.move_to_end(key)
         while len(self.buckets) > self.max_peers:
             self.buckets.popitem(last=False)
-        return wait
+        return wait, 'address_rate_limited' if wait else None
+
+    def throttle(self, peer, path):
+        return self.check(peer, path)[0]
+
+    @staticmethod
+    def record(scope, code, reason):
+        """Count a guard rejection in the same per-request log and /metrics as admission rejections."""
+        metrics = getattr(getattr(scope.get('app'), 'state', None), 'metrics', None)
+        if metrics is not None:
+            metrics.reject(code, reason)
+        else:
+            logging.getLogger('askiisc.requests').info(
+                json.dumps({'http': code, 'status': f'rejected:{reason}', 'tenant': None}))
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
@@ -111,9 +158,11 @@ class RequestGuard:
         if b'content-length' in headers and b'transfer-encoding' in headers:
             return await reject(400, 'Ambiguous request framing')
         path = scope.get('path','/')
-        wait = self.throttle((scope.get('client') or ('unknown',0))[0], path)
+        wait, reason = self.check((scope.get('client') or ('unknown',0))[0], path)
         if wait:
-            return await reject(429, 'Too many requests. Try again later.', retry_after_s=wait)
+            self.record(scope, 429, reason)
+            return await reject(429, 'Too many requests. Try again later.', reason=reason,
+                                limiter='request_guard', retry_after_s=wait)
         if scope['method'] in {'POST','PUT','PATCH','DELETE'}:
             expected = origin or (scope.get('scheme','http')+'://'+host)
             if headers.get(b'sec-fetch-site') == 'cross-site' or (b'origin' in headers and headers[b'origin'] != expected):
@@ -129,8 +178,10 @@ class RequestGuard:
             content_type = headers.get(b'content-type','').split(';')[0].strip().lower()
             if content_type != 'application/json' and path != '/auth/logout':
                 return await reject(415, 'Use application/json')
-            if self.readers >= 64:
-                return await reject(429, 'Server is busy. Try again later.', retry_after_s=2)
+            if self.readers >= self.limits['max_concurrent_body_reads']:
+                self.record(scope, 429, 'request_bodies_busy')
+                return await reject(429, 'Server is busy. Try again later.', reason='request_bodies_busy',
+                                    limiter='request_guard', retry_after_s=2)
             body = bytearray()
             self.readers += 1
             try:
