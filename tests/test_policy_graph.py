@@ -115,3 +115,40 @@ def test_graph_free_multi_query_preserves_access_scopes():
     assert len(variants)<=5 and len(result.passages)==2
     assert all(scope==['public'] and not graph for _,scope,graph,_ in retriever.calls)
     assert result.citations
+
+@pytest.mark.parametrize('text', [
+    'Graph Databases',            # "ph D" inside two words (#59)
+    'SystemTechnologies',         # "m Tech" inside a word (#59)
+    'Systems Technologies',
+    'Web Technologies',           # "b Tech"
+    'Item Descriptions',          # "m Des"
+    'Atom Science',               # "m Sc"
+    'Morphdata pipeline',
+])
+def test_programme_names_are_not_matched_inside_words(text):
+    assert programmes(text) == []
+
+@pytest.mark.parametrize('text,expected', [
+    ('M.Tech.', ['MTech']),
+    ('MTech', ['MTech']),
+    ('M Tech students', ['MTech']),
+    ('MTechs and PhDs', ['PhD', 'MTech']),
+    ('Ph.D. admissions', ['PhD']),
+    ('PhD/M.Tech (Research)', ['MTechResearch', 'PhD']),
+    ('(M.Tech.)', ['MTech']),
+    ('doctoral programme', ['PhD']),
+    ('Master of Technology in Graph Databases', ['MTech']),
+    ('B.Tech, M.Des and M.Sc', ['MDes', 'MSc', 'BTech']),
+])
+def test_programme_names_still_match_as_whole_tokens(text, expected):
+    assert programmes(text) == expected
+
+def test_programme_filter_keeps_general_sources_whose_words_contain_programme_letters():
+    # #59: "DS 299 Graph Databases" names no programme, so an M.Tech. filter must keep it.
+    from askiisc_serving.retrieval_client import _filter_programme
+    hits = [{'title': 'DS 299 Graph Databases', 'section': '', 'programme': 'not specified'},
+            {'title': 'SystemTechnologies', 'section': '', 'programme': 'not specified'},
+            {'title': 'Ph.D. comprehensive exam', 'section': '', 'programme': 'not specified'}]
+    kept, trace = _filter_programme(hits, 'M.Tech.')
+    assert [h['title'] for h in kept] == ['DS 299 Graph Databases', 'SystemTechnologies']
+    assert trace['applied'] and trace['removed'] == 1
