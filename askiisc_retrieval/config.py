@@ -45,7 +45,8 @@ CHUNK_WORDS = 250
 CHUNK_OVERLAP_WORDS = 40
 
 # Reranking (FR-13) and the abstention threshold (FR-11)
-# Laptop default: bge-reranker-base (~1.1 GB). Deployment on GPU: BAAI/bge-reranker-v2-m3.
+# Default and the configuration under test: bge-reranker-base (~1.1 GB), with ASKIISC_RERANK_MIN=0.69
+# (claude/GPU_RUNBOOK.md). Another reranker, e.g. BAAI/bge-reranker-v2-m3, needs its own calibrated cutoff.
 RERANK_MODEL = os.environ.get("ASKIISC_RERANK_MODEL", "BAAI/bge-reranker-base")
 # Cost grows linearly with the pool and roughly linearly with length. On a laptop CPU, try
 # ASKIISC_RERANK_POOL=6 / ASKIISC_RERANK_MAX_LEN=256 if it is too slow; keep the defaults for reported numbers.

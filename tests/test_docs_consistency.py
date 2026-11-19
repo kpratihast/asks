@@ -30,3 +30,33 @@ def test_models_md_documents_how_to_install_the_vllm_metal_environment():
     assert '## Install vLLM-Metal' in models
     install = models.split('## Install vLLM-Metal', 1)[1]
     assert 'install.sh' in install and '~/.venv-vllm-metal' in install
+
+
+def _exports(text):
+    """Every `export NAME=value` setting in a document (several may share one line)."""
+    lines = [line for line in text.splitlines() if line.lstrip().startswith('export ')]
+    return dict(re.findall(r'\b(ASKIISC_[A-Z_]+|SERVED_MODEL)=(\S+)', '\n'.join(lines)))
+
+
+def test_gpu_runbook_named_in_pinned_issue_exists_and_is_linked():
+    # #18: issue #1 tells red teams "README, then claude/GPU_RUNBOOK.md".
+    assert (ROOT / 'claude/GPU_RUNBOOK.md').is_file()
+    assert 'claude/GPU_RUNBOOK.md' in (ROOT / 'README.md').read_text(encoding='utf-8')
+    assert 'claude/GPU_RUNBOOK.md' in (ROOT / 'SERVING.md').read_text(encoding='utf-8')
+
+
+def test_serving_gpu_section_matches_the_runbook_configuration():
+    # #18: SERVING.md §2 used bge-reranker-v2-m3, no gate and the external ingestion backend.
+    runbook = _exports((ROOT / 'claude/GPU_RUNBOOK.md').read_text(encoding='utf-8'))
+    serving = (ROOT / 'SERVING.md').read_text(encoding='utf-8')
+    gpu = _exports(serving.split('## 2. On the GPU', 1)[1].split('\n## 3.', 1)[0])
+    keys = ('ASKIISC_BACKEND', 'ASKIISC_EMBED_MODEL', 'ASKIISC_EMBED_DIM', 'ASKIISC_RERANKER',
+            'ASKIISC_RERANK_MODEL', 'ASKIISC_RERANK_MIN', 'ASKIISC_SOURCE_DEPARTMENTS', 'SERVED_MODEL')
+    assert {k: gpu.get(k) for k in keys} == {k: runbook.get(k) for k in keys}
+    assert runbook['ASKIISC_RERANK_MODEL'] == 'BAAI/bge-reranker-base' and runbook['ASKIISC_RERANK_MIN'] == '0.69'
+    assert runbook['ASKIISC_BACKEND'] == 'stub' and runbook['SERVED_MODEL'] == 'llama-3.1-8b'
+
+
+def test_reranker_comment_does_not_point_the_gpu_deployment_at_another_reranker():
+    config = (ROOT / 'askiisc_retrieval/config.py').read_text(encoding='utf-8')
+    assert 'Deployment on GPU: BAAI/bge-reranker-v2-m3' not in config

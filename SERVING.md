@@ -58,19 +58,33 @@ one process plus Ollama; close the browser first. On CPU, expect tens of seconds
 
 ## 2. On the GPU (vLLM)
 
+The configuration under test (pinned issue #1) is Llama 3.1 8B (vLLM, BF16) + BGE-M3 +
+`BAAI/bge-reranker-base` with the 0.69 refusal gate on, using the standalone `stub` backend, so no
+external ingestion stores are needed. [claude/GPU_RUNBOOK.md](claude/GPU_RUNBOOK.md) has the full
+steps (index build, keys, what to record); the commands below are the same settings.
+
 ```bash
-./deploy/vllm_variants.sh 3b            # or 8b | 8b-awq | b1-3b  (one at a time)
-export SERVED_MODEL=llama-3.2-3b VLLM_URL=http://127.0.0.1:8000 MAX_MODEL_LEN=8192
-export ASKIISC_DEVICE=cuda ASKIISC_RERANK_MODEL=BAAI/bge-reranker-v2-m3
-export ASKIISC_BACKEND=ingestion ...   # retrieval on the ingestion stores: see INTEGRATION.md
-export SERVING_KEYS_FILE=serving_keys.yaml
-python -m askiisc_serving --host 0.0.0.0 --port 8100
+./deploy/vllm_variants.sh 8b            # first terminal; or 3b | 8b-awq | b1-3b | b1-8b | b1-8b-awq (one at a time)
+```
+
+```bash
+export ASKIISC_DEVICE=cuda ASKIISC_BACKEND=stub ASKIISC_DATA_DIR="$PWD/data/assessment"
+export ASKIISC_EMBED_MODEL=BAAI/bge-m3 ASKIISC_EMBED_DIM=1024
+export ASKIISC_RERANKER=crossencoder ASKIISC_RERANK_MODEL=BAAI/bge-reranker-base ASKIISC_RERANK_MIN=0.69
+export ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE
+python -m askiisc_retrieval.cli fetch && python -m askiisc_retrieval.cli ingest   # once
+export SERVED_MODEL=llama-3.1-8b VLLM_URL=http://127.0.0.1:8000/v1 MAX_MODEL_LEN=8192
+export PUBLIC_CHAT=0 SERVING_KEYS_FILE=serving_keys.yaml
+python -m askiisc_serving --host 127.0.0.1 --port 8100
 ```
 
 - The Llama models are gated on Hugging Face: accept the licence and set `HF_TOKEN` once to download,
   then run with `HF_HUB_OFFLINE=1` so nothing leaves the cloud at runtime (NFR-8).
-- If you set `ASKIISC_RERANK_MIN`, calibrate it on the indexed departments with your selected
-  reranker. By default, reranking orders the evidence without applying a score cutoff.
+- The 0.69 cutoff belongs to `bge-reranker-base`: it was calibrated on earlier CDS data and reproduces
+  the declared baseline. A different reranker (for example `BAAI/bge-reranker-v2-m3`) needs its own
+  calibrated cutoff; with `ASKIISC_RERANK_MIN=none` (the code default) reranking only orders the evidence.
+- `ASKIISC_BACKEND=ingestion` reads the external ingestion team's PostgreSQL/Neo4j stores instead
+  (see INTEGRATION.md). That is an integration option, not the configuration under test.
 - Set `SERVING_TOKENIZER=meta-llama/Llama-3.2-3B-Instruct` to count prompt tokens exactly (default: a
   conservative estimate).
 

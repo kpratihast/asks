@@ -14,7 +14,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-For a CPU-only Linux install, install PyTorch from the [CPU wheel index](https://download.pytorch.org/whl/cpu) before installing the requirements. Start a compatible model server and set its URL and model name. See [model setup](MODELS.md) for the Mac and CUDA launch scripts.
+For a CPU-only Linux install, install PyTorch from the [CPU wheel index](https://download.pytorch.org/whl/cpu) before installing the requirements. Start a compatible model server and set its URL and model name. See [model setup](MODELS.md) for the Mac and CUDA launch scripts, and [claude/GPU_RUNBOOK.md](claude/GPU_RUNBOOK.md) for the GPU configuration under test.
 
 ```bash
 export VLLM_URL=http://127.0.0.1:8000/v1
