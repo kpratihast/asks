@@ -1,6 +1,10 @@
 # GPU assessment setup
 
-The team must supply the assessment GPU host and private reporting contact. Record the GPU, driver, CUDA, Python, vLLM version and model revision with each result. Use Python 3.12 and the model installation guidance in SERVING.md. Accept model licences before downloading weights.
+**GPU access:** none is provided by the blue team. Deploy on your own CUDA GPU (24 GB, e.g. RTX 4090, for Llama 3.1 8B BF16) following this runbook.
+
+**Private reporting:** report Major security or privacy findings privately to the blue team (direct message on Teams; contacts in pinned issue #1) and the mentors, not in a public issue.
+
+Record the GPU, driver, CUDA, Python, vLLM version and model revision with each result. Use Python 3.12 and the model installation guidance in SERVING.md. Accept model licences before downloading weights.
 
 The standalone backend avoids a dependency on the external ingestion team's databases.
 

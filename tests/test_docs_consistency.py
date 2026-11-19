@@ -60,3 +60,10 @@ def test_serving_gpu_section_matches_the_runbook_configuration():
 def test_reranker_comment_does_not_point_the_gpu_deployment_at_another_reranker():
     config = (ROOT / 'askiisc_retrieval/config.py').read_text(encoding='utf-8')
     assert 'Deployment on GPU: BAAI/bge-reranker-v2-m3' not in config
+
+
+def test_gpu_runbook_states_gpu_access_and_private_reporting_instead_of_placeholders():
+    # #18: issue #1 and the runbook left the GPU host and the private-reporting contact unfilled.
+    runbook = (ROOT / 'claude/GPU_RUNBOOK.md').read_text(encoding='utf-8')
+    assert '**GPU access:**' in runbook and '**Private reporting:**' in runbook
+    assert 'must supply' not in runbook and '<fill in>' not in runbook and '<team email>' not in runbook
