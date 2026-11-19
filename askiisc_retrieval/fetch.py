@@ -103,6 +103,7 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
     index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {}
     results = []
     sources = load_sources()
+    checked: set[str] = set()      # URLs already requested in this run: the crawl reuses them (#44 E4)
     with RawVersions(RAW_DIR, raw_name) as versions, \
             httpx.Client(headers={"User-Agent": UA}, follow_redirects=True, timeout=30) as client:
         for page in sources["pages"]:
@@ -116,6 +117,8 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
                 print(f"  FAILED  {url}  ({e})")
                 results.append({"url": url, "status": f"error: {e}"})
                 continue
+            from .crawl import normalise
+            checked.add(normalise(url))
             if status != "unchanged":
                 index[url] = {"file": path.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                               "bytes": path.stat().st_size, "content_hash": versions.latest(url)[1]}
@@ -127,7 +130,8 @@ def fetch_all(refresh: bool = False, delay_s: float = 1.0) -> list[dict]:
             print(f"\nCrawling {crawl_cfg['seeds']} (depth {crawl_cfg['max_depth']}, max {crawl_cfg['max_pages']} pages) ...")
             found = crawl(crawl_cfg["seeds"], crawl_cfg["max_depth"], crawl_cfg["max_pages"], client, raw_name,
                           delay_s=crawl_cfg.get("delay_s", 0.5),
-                          department=crawl_cfg["department"], refresh=refresh, versions=versions)
+                          department=crawl_cfg["department"], refresh=refresh, versions=versions,
+                          checked=checked)
             results.append({"url": "(crawl)", "status": f"{len(found)} pages"})
             print(f"Crawl: {len(found)} pages")
         if sources["linked_pages"]:

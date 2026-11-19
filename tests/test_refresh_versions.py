@@ -285,3 +285,25 @@ def test_cli_has_refresh_scheduler_and_trigger():
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["refresh", "--help"])
     assert exit_info.value.code == 0
+
+
+def test_page_both_listed_and_crawled_is_requested_once_per_refresh(tmp_path, monkeypatch, env):
+    """#44 (E4): a page listed in sources.yaml that is also a crawl seed was requested twice per refresh."""
+    raw, site = env
+    sources = tmp_path / "sources.yaml"
+    sources.write_text(f"""department: CDS
+pages:
+  - {{url: '{LISTED}', department: CDS, doc_type: admissions, scope: public}}
+  - {{url: '{HOME}', department: CDS, doc_type: page, scope: public}}
+crawls:
+  - {{seeds: ['{HOME}'], department: CDS, max_depth: 1, max_pages: 10, delay_s: 0}}
+""")
+    fetch_mod.fetch_all(refresh=False, delay_s=0)
+    for refresh in (False, True):
+        site.requests.clear()
+        fetch_mod.fetch_all(refresh=refresh, delay_s=0)
+        requested = [u for u, _ in site.requests]
+        assert len(requested) == len(set(requested)), requested        # no URL requested twice in one run
+    assert requested.count(HOME) == 1 and set(requested) == set(site.pages)
+    crawled = {p["url"] for p in json.loads((raw / "crawl.json").read_text())}
+    assert HOME in crawled and HOME + "people/" in crawled             # the crawl still follows the seed's links

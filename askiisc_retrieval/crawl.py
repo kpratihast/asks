@@ -87,17 +87,19 @@ def links_in(html: bytes | str, base: str) -> list[str]:
 
 def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client, raw_name,
           delay_s: float = 0.5, respect_robots: bool = True, log=print, *, department: str | None = None,
-          refresh: bool = False, versions=None) -> list[dict]:
+          refresh: bool = False, versions=None, checked: set[str] | None = None) -> list[dict]:
     """Breadth-first crawl of one department host (FR-1).
 
     Without `refresh`, a page already saved is reused as a frozen snapshot. With `refresh`, saved pages are
     re-requested with If-None-Match / If-Modified-Since; a 304 or an unchanged content hash writes nothing,
-    and a changed page is stored as a new immutable version with the previous one kept (FR-3)."""
+    and a changed page is stored as a new immutable version with the previous one kept (FR-3).
+    `checked` holds URLs already requested in this run (pages listed in sources.yaml that are also crawl
+    seeds or links): they are read from the raw store instead of being requested a second time (#44)."""
     if versions is None:
         from .versions import RawVersions
         with RawVersions(RAW_DIR, raw_name) as own:
             return crawl(seeds, max_depth, max_pages, client, raw_name, delay_s, respect_robots, log,
-                         department=department, refresh=refresh, versions=own)
+                         department=department, refresh=refresh, versions=own, checked=checked)
     home = urlparse(normalise(seeds[0])).netloc
     if any(urlparse(normalise(seed)).netloc != home for seed in seeds):
         raise ValueError("Use a separate crawl group for each department host")
@@ -136,8 +138,8 @@ def crawl(seeds: list[str], max_depth: int, max_pages: int, client: httpx.Client
         if not fetch_ok:
             continue
         path = RAW_DIR / raw_name(url)
-        if path.exists() and not refresh:
-            body = path.read_bytes()                    # frozen snapshot: reused unless refreshing
+        if path.exists() and (not refresh or url in (checked or ())):
+            body = path.read_bytes()                    # frozen snapshot, or already re-checked in this run
         else:
             try:
                 for _ in range(10):
