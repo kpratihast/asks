@@ -34,7 +34,7 @@ Ollama serves the same OpenAI-compatible API as vLLM, so the code does not chang
 # once: install Ollama from ollama.com, then
 ollama pull llama3.2:1b          # 1.3 GB; use llama3.2:3b (2 GB) if you have the memory
 # keys (never commit the real file)
-copy serving_keys.example.yaml serving_keys.yaml   # then edit: put long random keys
+python tools/make_keys.py serving_keys.yaml        # random keys; the example's placeholders are rejected
 conda activate askiisc
 docker compose up -d qdrant
 $env:QDRANT_URL       = "http://127.0.0.1:6333"
@@ -58,19 +58,33 @@ one process plus Ollama; close the browser first. On CPU, expect tens of seconds
 
 ## 2. On the GPU (vLLM)
 
+The configuration under test (pinned issue #1) is Llama 3.1 8B (vLLM, BF16) + BGE-M3 +
+`BAAI/bge-reranker-base` with the 0.69 refusal gate on, using the standalone `stub` backend, so no
+external ingestion stores are needed. [claude/GPU_RUNBOOK.md](claude/GPU_RUNBOOK.md) has the full
+steps (index build, keys, what to record); the commands below are the same settings.
+
 ```bash
-./deploy/vllm_variants.sh 3b            # or 8b | 8b-awq | b1-3b  (one at a time)
-export SERVED_MODEL=llama-3.2-3b VLLM_URL=http://127.0.0.1:8000 MAX_MODEL_LEN=8192
-export ASKIISC_DEVICE=cuda ASKIISC_RERANK_MODEL=BAAI/bge-reranker-v2-m3
-export ASKIISC_BACKEND=ingestion ...   # retrieval on the ingestion stores: see INTEGRATION.md
-export SERVING_KEYS_FILE=serving_keys.yaml
-python -m askiisc_serving --host 0.0.0.0 --port 8100
+./deploy/vllm_variants.sh 8b            # first terminal; or 3b | 8b-awq | b1-3b | b1-8b | b1-8b-awq (one at a time)
+```
+
+```bash
+export ASKIISC_DEVICE=cuda ASKIISC_BACKEND=stub ASKIISC_DATA_DIR="$PWD/data/assessment"
+export ASKIISC_EMBED_MODEL=BAAI/bge-m3 ASKIISC_EMBED_DIM=1024
+export ASKIISC_RERANKER=crossencoder ASKIISC_RERANK_MODEL=BAAI/bge-reranker-base ASKIISC_RERANK_MIN=0.69
+export ASKIISC_SOURCE_DEPARTMENTS=CDS,CSA,ECE
+python -m askiisc_retrieval.cli fetch && python -m askiisc_retrieval.cli ingest   # once
+export SERVED_MODEL=llama-3.1-8b VLLM_URL=http://127.0.0.1:8000/v1 MAX_MODEL_LEN=8192
+export PUBLIC_CHAT=0 SERVING_KEYS_FILE=serving_keys.yaml
+python -m askiisc_serving --host 127.0.0.1 --port 8100
 ```
 
 - The Llama models are gated on Hugging Face: accept the licence and set `HF_TOKEN` once to download,
   then run with `HF_HUB_OFFLINE=1` so nothing leaves the cloud at runtime (NFR-8).
-- If you set `ASKIISC_RERANK_MIN`, calibrate it on the indexed departments with your selected
-  reranker. By default, reranking orders the evidence without applying a score cutoff.
+- The 0.69 cutoff belongs to `bge-reranker-base`: it was calibrated on earlier CDS data and reproduces
+  the declared baseline. A different reranker (for example `BAAI/bge-reranker-v2-m3`) needs its own
+  calibrated cutoff; with `ASKIISC_RERANK_MIN=none` (the code default) reranking only orders the evidence.
+- `ASKIISC_BACKEND=ingestion` reads the external ingestion team's PostgreSQL/Neo4j stores instead
+  (see INTEGRATION.md). That is an integration option, not the configuration under test.
 - Set `SERVING_TOKENIZER=meta-llama/Llama-3.2-3B-Instruct` to count prompt tokens exactly (default: a
   conservative estimate).
 
@@ -91,7 +105,7 @@ Response (`status` is what the client must act on):
 | status | meaning | client shows |
 |---|---|---|
 | `answered` | answer passed the citation check | `answer`; `citations` resolve [S#] to title, URL, version, excerpt |
-| `abstained` | `insufficient_evidence` (model not called) or `model_abstained` | "I could not find this in the CDS pages." (+ `sources_that_may_help`) |
+| `abstained` | `insufficient_evidence` (model not called) or `model_abstained` | "I could not find this in the available IISc sources." (+ `sources_that_may_help`) |
 | `fallback` | `generation_unavailable` or `citation_check_failed` | `excerpts`: source titles, links, excerpts; no generated text |
 
 Always present: `trace` (snapshot id, mode, `timings_ms`: queue, retrieval, prompt, ttft, generation,
@@ -103,13 +117,21 @@ Errors: 401 no/invalid key, 422 bad request, 429 over limit (`Retry-After` heade
 
 ### Streaming (`"stream": true`, Server-Sent Events)
 `event: meta` (citation metadata for [S1].., budget, snapshot) -> `event: token` (`{"t": "..."}`) ...
--> `event: done` (the same object as the JSON response). If `done.status` is `fallback` with
-`replace_streamed_text: true`, the client must replace the streamed text with the excerpts.
+-> `event: done` (the same object as the JSON response).
+
+Tokens are sent while the model is still generating (FR-12), one whole sentence or list item at a time:
+a sentence is sent once it carries a valid [S#] marker and its names and numbers are found in the cited
+passage (the same claim check as the final answer). Refusal phrases, stated counts, e-mail addresses and
+URLs are held back until generation ends. The whole-answer checks run on `done`; if they reject or change
+text that was already sent, `done` carries `replace_streamed_text: true` and the client must replace the
+streamed text with `done.answer` (or the excerpts when `answer` is null). The bundled UI always shows
+`done.answer`. `trace.timings_ms.ttft_ms` is the model's own TTFT; measure client TTFT (NFR-5) with
+`python tools/eval_e2e.py --stream`, which records `client_ttft_ms` and `client_total_ms`.
 Streaming does not regenerate; the JSON path regenerates once when citations are invalid.
 
 ### Others
 `GET /v1/sources/{chunk_id}` (full cited text, only if active and within the key's scope),
-`GET /healthz`, `GET /readyz` (retrieval + model endpoint), `GET /metrics` (Prometheus text).
+`GET /healthz`, `GET /readyz` (retrieval + model endpoint; admission and model details for authorized operators only), `GET /metrics` (Prometheus text, same authorization).
 
 ## 4. Settings (environment variables)
 
@@ -157,8 +179,16 @@ column against `expected_answer`.
 - On the 120-question set, retrieval alone would answer 3 of the 20 must-refuse questions (topic pages
   without the exact fact). The prompt rule 3 and the model's abstention must catch them: measure
   abstention end to end, never on retrieval alone.
-- Streaming shows text before the citation check; a failed check is signalled in `done` and the client
-  must replace the text.
+- Streaming sends text one checked sentence at a time (a valid marker and the claim-support check per
+  sentence); refusals, counts, e-mail addresses and URLs wait for the end. If the whole-answer checks then
+  reject or change sent text, `done` carries `replace_streamed_text: true` and the client must replace it.
 - One process, models loaded once; scale by running more processes behind the gateway.
 - Kubernetes manifests are not included yet (PRD lists Kubernetes); the services run as plain processes or
   Docker containers.
+
+
+Anonymous chat requires PUBLIC_CHAT=1. Key-file deployments reject missing or invalid credentials. The no-retrieval baseline requires ALLOW_NO_RETRIEVAL=1 and an admin bearer key.
+
+Set AUTH_PUBLIC_ORIGIN for public HTTPS, or ALLOWED_HOSTS for a custom development host. Defaults permit loopback and the test client.
+
+SSE emits source metadata first, then each answer sentence once it has passed the per-sentence checks (issue #26). Model ttft_ms measures the upstream provider; measure client-visible time to first token with `tools/eval_e2e.py --stream` (`client_ttft_ms`).

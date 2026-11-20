@@ -28,6 +28,8 @@ APPLY_TO_INSTITUTE = re.compile(r"\b(?:apply|applying)\s+(?:to|at)\s+(?:the\s+)?
 
 
 def term_key(term: str) -> tuple[int, int]:
+    if not isinstance(term, str) or not re.fullmatch(r"[0-9]{4}-(JAN|SUM|AUG)", term):
+        return (-1, -1)
     y, s = term.split("-")
     return int(y), SEASON_ORDER[s]
 

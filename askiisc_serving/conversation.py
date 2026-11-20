@@ -58,10 +58,18 @@ def context_question(question: str, history) -> str | None:
     return None
 
 
-def valid_rewrite(question: str, rewritten: str, max_chars: int) -> bool:
-    """Reject rewrites which drop the latest question's intent or substitute numbers."""
+def valid_rewrite(question: str, rewritten: str, max_chars: int, previous: str = "") -> bool:
+    """Reject rewrites which drop the latest question's intent or substitute numbers.
+
+    A follow-up made only of filler words ("Tell me more about it") has no intent words to check, so its
+    rewrite is accepted only if every content word in it comes from the user's own two questions: the
+    model may resolve the reference but not add terms (#50)."""
     if not rewritten.strip() or len(rewritten.strip()) > max_chars or guidance_reason(rewritten):
         return False
-    tokens = set(re.findall(r"[\w]+", question.casefold())) - _FILLER
-    rewritten_tokens = set(re.findall(r"[\w]+", rewritten.casefold()))
-    return bool(tokens) and tokens <= rewritten_tokens
+    words = lambda text: set(re.findall(r"[\w]+", text.casefold()))   # noqa: E731
+    tokens = words(question) - _FILLER
+    rewritten_tokens = words(rewritten)
+    if tokens:
+        return tokens <= rewritten_tokens
+    added = rewritten_tokens - _FILLER - words(previous) - words(question)
+    return bool(previous) and bool(rewritten_tokens - _FILLER) and not added

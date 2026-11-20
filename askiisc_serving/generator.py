@@ -11,6 +11,7 @@ here: evidence blocks are added best-first until the budget is used; lower-ranke
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import asyncio
 import math
 import re
@@ -95,6 +96,10 @@ class Generator:
         self.c = client or httpx.AsyncClient(timeout=httpx.Timeout(settings.gen_timeout_s,
                                                                    connect=settings.gen_connect_timeout_s), trust_env=False)
         self.counter_name = "estimate"
+        self.identity = {"served_name": settings.served_model, "checkpoint": settings.model_checkpoint or None,
+                         "revision": settings.model_revision or None, "precision": settings.model_precision or None,
+                         "digest": None, "parameter_size": None,
+                         "source": "config" if settings.model_checkpoint else "unknown"}
         if count_tokens is not None:
             self.count, self.counter_name = count_tokens, "custom"
         elif settings.tokenizer:
@@ -152,10 +157,15 @@ class Generator:
             messages = [{"role": "system", "content": SYSTEM_NO_RETRIEVAL},
                         {"role": "user", "content": "Question: " + question}]
             used = sum(self.count(m["content"]) + 4 for m in messages)
-            return messages, [], {"limit": self._limit(), "prompt_tokens": used, "evidence_tokens": 0,
+            overflow = used > self._limit()
+            return ([] if overflow else messages), [], {"limit": self._limit(), "overflow": overflow, "prompt_tokens": 0 if overflow else used, "evidence_tokens": 0,
                                   "selected": 0, "dropped": 0, "truncated": False, "counter": self.counter_name}
         limit = self._limit()
         fixed = self.count(SYSTEM) + self.count(self._user([], question, programme, academic_year)) + 8
+        if fixed > limit:
+            return [], [], {"limit": limit, "prompt_tokens": 0, "evidence_tokens": 0,
+                            "selected": 0, "dropped": len(hits), "truncated": False,
+                            "counter": self.counter_name, "overflow": True}
         room = limit - fixed
         from .evidence_selection import evidence_bundle
         considered, required = evidence_bundle(question, hits) if mode == "full" else (list(hits), set())
@@ -181,6 +191,8 @@ class Generator:
                 h = {**h, "text": h["text"][:max(keep, 0)] + " ..."}
                 b, truncated = self.block(1, h), True
                 n = self.count(b) + 2
+                if n > room - used_ev:
+                    continue
             selected.append({**h, "prompt_marker": f"S{len(selected) + 1}"})
             required_selected.add(h["marker"])
             blocks.append(b)
@@ -191,6 +203,12 @@ class Generator:
                   "selected": len(selected), "dropped": len(hits) - len(selected), "truncated": truncated,
                   "counter": self.counter_name, "selection": "relationship_bundle" if required else "ranked",
                   "required_sources": len(required), "required_selected": len(required & required_selected)}
+        actual = sum(self.count(message["content"]) + 4 for message in messages)
+        if actual > limit:
+            budget.update(prompt_tokens=0, evidence_tokens=0, selected=0, dropped=len(hits),
+                          required_selected=0, overflow=True)
+            return [], [], budget
+        budget["prompt_tokens"] = actual
         return messages, selected, budget
 
     def _limit(self) -> int:
@@ -218,10 +236,28 @@ class Generator:
         except TimeoutError:
             raise GenerationUnavailable('Model completion timed out') from None
 
+    async def ensure_model(self) -> None:
+        """SERVED_MODEL=auto: resolve the served model on first use if it was down at startup (#48).
+        While the endpoint is unreachable this raises GenerationUnavailable, so answers take the excerpt
+        fallback (FR-11) instead of the gateway failing to start."""
+        if self.s.served_model != "auto":
+            return
+        try:
+            await self.discover()
+        except GenerationUnavailable:
+            raise
+        except Exception as e:
+            raise GenerationUnavailable(f"model endpoint unavailable: {type(e).__name__}") from e
+        try:
+            await self.identify()                     # FR-8 metadata for the model now being served
+        except Exception:
+            pass
+
     async def _stream(self, messages: list[dict]):
         """Yields ("token", text) for each piece, then ("usage", {...}) once at the end."""
+        await self.ensure_model()
         t0 = time.perf_counter()
-        ttft, usage, finish = None, None, None
+        ttft, usage, finish, served_by = None, None, None, None
         try:
             async with self.c.stream(
                 "POST",
@@ -253,6 +289,8 @@ class Generator:
                         raise GenerationUnavailable(f"Model stream error {ev['error'].get('code', 'unknown')}")
                     if ev.get("usage"):
                         usage = _usage_counters(ev["usage"])
+                    if served_by is None and isinstance(ev.get("model"), str):
+                        served_by = ev["model"][:200]        # the model id the server says generated this
                     for ch in ev.get("choices") or []:
                         if ch.get("finish_reason") == "error":
                             raise GenerationUnavailable("Model stream ended with an error")
@@ -270,7 +308,8 @@ class Generator:
         if finish != "stop":
             raise GenerationUnavailable("Model stream ended without a complete answer")
         yield "usage", {"usage": usage, "ttft_ms": None if ttft is None else round(ttft * 1000, 1),
-                        "generation_ms": round((time.perf_counter() - t0) * 1000, 1), "finish_reason": finish}
+                        "generation_ms": round((time.perf_counter() - t0) * 1000, 1), "finish_reason": finish,
+                        "served_by": served_by}
 
     async def complete(self, messages: list[dict]) -> tuple[str, dict]:
         parts, meta = [], {}
@@ -300,8 +339,66 @@ class Generator:
             raise GenerationUnavailable("Model context is too small for the configured output budget")
         return model
 
+    async def identify(self) -> dict:
+        """FR-8: which checkpoint and precision the model server is actually serving.
+
+        vLLM reports the checkpoint path in /v1/models ("root"); when that folder is readable, its config.json
+        gives the precision (torch_dtype, or quantization_config for AWQ/GPTQ). Ollama reports quantization
+        and digest via /api/show and /api/tags. MODEL_CHECKPOINT / MODEL_PRECISION / MODEL_REVISION fill the
+        gaps, labelled as configured rather than reported."""
+        info = {"served_name": self.s.served_model, "checkpoint": None, "revision": self.s.model_revision or None,
+                "precision": None, "digest": None, "parameter_size": None, "source": "unknown"}
+        base = self.s.vllm_url.rstrip("/")
+        try:
+            r = await self.c.get(base + "/v1/models", headers=self._headers(), timeout=5)
+            entry = next((m for m in r.json().get("data", []) if m.get("id") == self.s.served_model), None) \
+                if r.status_code == 200 else None
+        except Exception:
+            entry = None
+        if entry:
+            info["checkpoint"] = entry.get("root") or entry.get("id")
+            info["source"] = "model_server"
+            config_file = Path(str(entry.get("root") or "")) / "config.json"
+            try:
+                if entry.get("root") and config_file.is_file():
+                    cfg = json.loads(config_file.read_text(encoding="utf-8"))
+                    quant = cfg.get("quantization_config") or {}
+                    if quant.get("quant_method"):
+                        bits = quant.get("bits") or quant.get("w_bit")
+                        info["precision"] = f"{quant['quant_method']}-{bits}bit" if bits else str(quant["quant_method"])
+                    elif cfg.get("torch_dtype"):
+                        info["precision"] = {"bfloat16": "bf16", "float16": "fp16", "float32": "fp32"}.get(
+                            str(cfg["torch_dtype"]), str(cfg["torch_dtype"]))
+            except (OSError, ValueError):
+                pass
+        ollama = (entry or {}).get("owned_by") in {"library", "ollama"} or ":11434" in base
+        try:                                             # Ollama: quantization level and digest
+            if not ollama:
+                raise LookupError
+            show = await self.c.post(base + "/api/show", json={"model": self.s.served_model}, timeout=3)
+            if show.status_code == 200:
+                details = show.json().get("details") or {}
+                info["precision"] = info["precision"] or details.get("quantization_level")
+                info["parameter_size"] = details.get("parameter_size")
+                info["source"] = "model_server"
+                tags = await self.c.get(base + "/api/tags", timeout=3)
+                for m in (tags.json().get("models", []) if tags.status_code == 200 else []):
+                    if m.get("name") == self.s.served_model or m.get("model") == self.s.served_model:
+                        info["digest"] = m.get("digest")
+                        info["checkpoint"] = info["checkpoint"] or m.get("name")
+        except Exception:
+            pass
+        if not info["checkpoint"] and self.s.model_checkpoint:
+            info["checkpoint"], info["source"] = self.s.model_checkpoint, "config"
+        if not info["precision"] and self.s.model_precision:
+            info["precision"] = self.s.model_precision
+            info["precision_source"] = "config"
+        self.identity = info
+        return info
+
     async def ready(self) -> bool:
         try:
+            await self.ensure_model()
             r = await self.c.get(self.s.vllm_url.rstrip("/") + "/v1/models", headers=self._headers(), timeout=5)
             return r.status_code == 200 and any(
                 m.get("id") == self.s.served_model for m in r.json().get("data", []))

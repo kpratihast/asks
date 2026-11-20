@@ -17,14 +17,14 @@ def configure():
     defaults = {
         "ASKIISC_BACKEND": "stub", "ASKIISC_DATA_DIR": str(ROOT / "data" / "local"),
         "ASKIISC_EMBED_MODEL": "BAAI/bge-small-en-v1.5", "ASKIISC_EMBED_DIM": "384",
-        "ASKIISC_RERANKER": "none", "ASKIISC_RERANK_MIN": "none",
+        "ASKIISC_RERANKER": "on", "ASKIISC_RERANK_MIN": "0.69",   # abstention gate on (FR-11)
         "VLLM_URL": "http://127.0.0.1:8000", "SERVED_MODEL": "auto", "MODEL_PROVIDER_PREFERENCES": {},
         "ASKIISC_TRUSTED_MODEL_URL": "",
         "CHAT_TEMPLATE_KWARGS": {},
         "AUTH_COOKIE_SECURE": "0",
         "EMAIL_AUTH_ENABLED": "1", "AUTH_PROFESSOR_TEST_EMAILS": "",
         "MODEL_REASONING": {},
-        "MAX_MODEL_LEN": "4096", "MAX_OUTPUT_TOKENS": "512", "PUBLIC_CHAT": "1",
+        "MAX_MODEL_LEN": "4096", "MAX_OUTPUT_TOKENS": "512", "PUBLIC_CHAT": "0",   # FR-6: credentials required
         "GLOBAL_CONCURRENCY": "1", "TENANT_CONCURRENCY": "1", "TENANT_QUEUE": "4",
         "QUEUE_WAIT_S": "120", "GEN_TIMEOUT_S": "180", "TOKENIZERS_PARALLELISM": "false",
     }
@@ -54,12 +54,30 @@ def configure():
         os.environ.setdefault(k, v if isinstance(v, str) else json.dumps(v))
 
 
+def ensure_guest_key(path: Path | None = None) -> Path | None:
+    """FR-6: without email sign-in or an explicit PUBLIC_CHAT=1, every request needs a key. For a local run
+    with no key file, create a private guest key once in .local/ (git-ignored) and point the server at it."""
+    if os.environ.get("SERVING_KEYS_FILE") or os.environ.get("PUBLIC_CHAT") == "1":
+        return None
+    import secrets
+    import yaml
+    path = path or ROOT / ".local" / "serving_keys.yaml"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump({"keys": {secrets.token_urlsafe(32): {"tenant": "local", "role": "guest"}}}))
+        path.chmod(0o600)
+    os.environ["SERVING_KEYS_FILE"] = str(path)
+    print(f"Guest key: {path} (paste it into the chat page's 'API access' box, or send "
+          "'Authorization: Bearer <key>')", flush=True)
+    return path
+
+
 def prepare(refresh=False, rebuild=False):
     import httpx
     from askiisc_retrieval import config
-    from askiisc_retrieval.cli import make_embedder, make_store
-    from askiisc_retrieval.fetch import UA, download_source, load_sources, raw_name
-    from askiisc_retrieval.ingest_stub import build_index
+    from askiisc_retrieval.cli import make_embedder, safe_rebuild
+    from askiisc_retrieval.fetch import UA, load_sources, raw_name, refresh_source
+    from askiisc_retrieval.versions import RawVersions, write_if_changed
 
     if config.BACKEND != "stub" or config.QDRANT_URL:
         raise SystemExit("Local prepare requires ASKIISC_BACKEND=stub and QDRANT_URL unset. "
@@ -71,13 +89,16 @@ def prepare(refresh=False, rebuild=False):
     available, manifest = 0, {}
     # Fixed approved source list only: no synthetic fixtures, no unbounded crawl.
     sources = load_sources()
-    with httpx.Client(timeout=45, follow_redirects=True, headers={"User-Agent": UA}, trust_env=False) as client:
+    # FR-1/FR-3: a refresh re-checks each page conditionally and stores it, as a new immutable version,
+    # only when its content changed; an unchanged page is not rewritten.
+    with RawVersions(config.RAW_DIR, raw_name) as versions, \
+            httpx.Client(timeout=45, follow_redirects=True, headers={"User-Agent": UA}, trust_env=False) as client:
         for pg in sources["pages"]:
             target = config.RAW_DIR / raw_name(pg["url"])
             try:
                 if refresh or not target.exists():
-                    target.write_bytes(download_source(client, pg["url"]))
-                    manifest[pg["url"]] = {"file": target.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                    if refresh_source(client, versions, pg["url"]) != "unchanged":
+                        manifest[pg["url"]] = {"file": target.name, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
                     time.sleep(0.5)
                 available += 1
                 print("Source:", pg["url"], flush=True)
@@ -87,7 +108,7 @@ def prepare(refresh=False, rebuild=False):
         raise SystemExit("No configured source pages could be fetched; check network access and retry.")
     old_manifest = config.RAW_DIR / "index.json"
     previous = json.loads(old_manifest.read_text()) if old_manifest.exists() else {}
-    old_manifest.write_text(json.dumps({**previous, **manifest}, indent=2))
+    write_if_changed(old_manifest, json.dumps({**previous, **manifest}, indent=2))
     # Include the full cached crawl and bounded admissions snapshot on rebuild;
     # rebuilding only the small seed list would silently discard most local knowledge.
     from askiisc_retrieval.ingest_stub import load_page_inputs
@@ -97,15 +118,10 @@ def prepare(refresh=False, rebuild=False):
     pages = load_page_inputs(include_fixtures=False)
     if (config.DATA / 'admissions' / 'sources.json').is_file():
         print('Admissions sources: using the verified cache. Use tools/import_admissions.py --fetch for a fresh bounded snapshot.')
-    emb = make_embedder()
-    store = make_store(reset=False)
-    try:
-        if store.count():
-            # Acquire Qdrant's local lock before replacing anything; a running server owns it.
-            store.reset()
-        report = build_index(pages, emb, store, config.GRAPH_PATH, config.SNAPSHOT_PATH, config.CHUNKS_PATH)
-    finally:
-        store.close()
+    # FR-4: the same safe rebuild as `cli ingest` - the live index is never emptied first, so a failed or
+    # killed rebuild keeps serving the previous snapshot. (Opening the local store takes Qdrant's lock, so a
+    # running server still has to be stopped first.)
+    report = safe_rebuild(pages, make_embedder())
     print(json.dumps(report, indent=2))
 
 
@@ -126,6 +142,7 @@ def main():
         return
     if not config.SNAPSHOT_PATH.exists() and os.environ["ASKIISC_BACKEND"] == "stub":
         raise SystemExit("No local index yet. Run ./run-local.sh --prepare first.")
+    ensure_guest_key()
     from askiisc_serving.app import create_app
     import uvicorn
     print(f"Ask IISc: http://127.0.0.1:{args.port} | model: {os.environ['VLLM_URL']}", flush=True)

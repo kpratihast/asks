@@ -1,6 +1,7 @@
 """Paths and tunables. Everything lives under the project folder so the setup is portable."""
 from __future__ import annotations
 
+import math
 import os
 from datetime import date
 from pathlib import Path
@@ -44,7 +45,8 @@ CHUNK_WORDS = 250
 CHUNK_OVERLAP_WORDS = 40
 
 # Reranking (FR-13) and the abstention threshold (FR-11)
-# Laptop default: bge-reranker-base (~1.1 GB). Deployment on GPU: BAAI/bge-reranker-v2-m3.
+# Default and the configuration under test: bge-reranker-base (~1.1 GB), with ASKIISC_RERANK_MIN=0.69
+# (claude/GPU_RUNBOOK.md). Another reranker, e.g. BAAI/bge-reranker-v2-m3, needs its own calibrated cutoff.
 RERANK_MODEL = os.environ.get("ASKIISC_RERANK_MODEL", "BAAI/bge-reranker-base")
 # Cost grows linearly with the pool and roughly linearly with length. On a laptop CPU, try
 # ASKIISC_RERANK_POOL=6 / ASKIISC_RERANK_MAX_LEN=256 if it is too slow; keep the defaults for reported numbers.
@@ -53,7 +55,15 @@ RERANK_MAX_LEN = int(os.environ.get("ASKIISC_RERANK_MAX_LEN", "384"))
 # Set a hard floor only after calibrating on the deployed corpus and reranker.
 # Without one, reranking changes the order and serving decides whether the evidence answers the question.
 _RMIN = os.environ.get("ASKIISC_RERANK_MIN", "none")
-RERANK_MIN = None if _RMIN.lower() == "none" else float(_RMIN)
+if _RMIN.lower() == "none":
+    RERANK_MIN = None
+else:
+    RERANK_MIN = float(_RMIN)
+    if not math.isfinite(RERANK_MIN):
+        # #54: nan/inf silently passed `float()`; `top >= nan` is False for every query, so the
+        # sufficiency gate would abstain on all answerable questions with no indication the
+        # threshold itself was bad. Fail fast at config load instead.
+        raise ValueError(f"ASKIISC_RERANK_MIN must be a finite number or 'none', got {_RMIN!r}")
 DEVICE = os.environ.get("ASKIISC_DEVICE")    # "cuda" / "cpu"; default: cuda if available
 
 # Backend: "stub" = the laptop stand-in (fetch/ingest in this repo); "ingestion" = the ingestion team's
@@ -93,7 +103,7 @@ PEOPLE_K = int(os.environ.get("ASKIISC_PEOPLE_K", "5"))   # people-pass size; 0 
 PEOPLE_DOC_TYPES = ("people",)                              # doc_type of profile / research-interest pages
 GRAPH_EXTRA = 3          # max extra passages graph expansion may add (E5 tunes this)
 GRAPH_HOPS = 2           # walks only through Course/Person nodes, so 2 hops stays small
-GRAPH_TIMEOUT_S = 0.5
+GRAPH_TIMEOUT_S = float(os.environ.get("ASKIISC_GRAPH_TIMEOUT_S", "0.5"))
 
 
 def current_term(today: date | None = None) -> str:

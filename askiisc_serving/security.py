@@ -5,6 +5,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import math
 import os
 import posixpath
@@ -18,6 +19,35 @@ from urllib.parse import unquote, urlsplit
 import anyio
 
 from starlette.responses import JSONResponse
+
+
+def _positive_int(name, default):
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == '':
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f'{name} must be a positive integer, got {raw!r}') from None
+    if value < 1:
+        raise ValueError(f'{name} must be a positive integer, got {raw!r}')
+    return value
+
+
+def guard_limits() -> dict:
+    """Pre-authentication limits of RequestGuard, in requests per minute (token buckets that start full).
+
+    These run before the per-key admission controller (RATE_PER_MIN, C, Q, W, G) and apply per client
+    address as the gateway sees it, plus one bucket shared by all addresses. Reported by /readyz to
+    operators and documented in LOAD_TESTING.md (#55)."""
+    return {
+        'http': {'per_address_per_min': _positive_int('GUARD_PER_ADDRESS_PER_MIN', 180),
+                 'all_addresses_per_min': _positive_int('GUARD_ALL_ADDRESSES_PER_MIN', 1200),
+                 'applies_to': 'every path except /auth/request-otp and /auth/verify-otp'},
+        'otp': {'per_address_per_min': 10, 'all_addresses_per_min': 60, 'applies_to': '/auth/request-otp'},
+        'verify': {'per_address_per_min': 30, 'all_addresses_per_min': 120, 'applies_to': '/auth/verify-otp'},
+        'max_concurrent_body_reads': 64,
+    }
 
 
 class RequestGuard:
@@ -36,8 +66,10 @@ class RequestGuard:
         self.buckets = OrderedDict()
         self.global_buckets = {}
         self.readers = 0
-        html = (Path(__file__).parent / 'static/index.html').read_text()
-        hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() + "'"
+        self.limits = guard_limits()
+        # Hash the exact bytes FileResponse serves (UTF-8, no newline translation) on every OS.
+        html = (Path(__file__).parent / 'static/index.html').read_bytes().decode('utf-8')
+        hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(s.encode('utf-8')).digest()).decode() + "'"
                   for s in re.findall(r'<script>(.*?)</script>', html, re.S)]
         self.headers = {
             'content-security-policy': "default-src 'none'; script-src " + ' '.join(hashes) +
@@ -58,19 +90,35 @@ class RequestGuard:
         table[key] = (tokens-1 if not wait else tokens, now)
         return wait
 
-    def throttle(self, peer, path):
+    def check(self, peer, path):
+        """(seconds to wait, reason); wait 0 means allowed. Reasons: all_addresses_rate_limited
+        (bucket shared by every address) or address_rate_limited (this client address)."""
         group = 'otp' if path == '/auth/request-otp' else 'verify' if path == '/auth/verify-otp' else 'http'
-        per_peer, global_limit = {'otp': (10, 60), 'verify': (30, 120), 'http': (180, 1200)}[group]
+        per_peer = self.limits[group]['per_address_per_min']
+        global_limit = self.limits[group]['all_addresses_per_min']
         now = time.monotonic()
         wait = self.take(self.global_buckets, group, global_limit, now)
         if wait:
-            return wait
+            return wait, 'all_addresses_rate_limited'
         key = (peer, group)
         wait = self.take(self.buckets, key, per_peer, now)
         self.buckets.move_to_end(key)
         while len(self.buckets) > self.max_peers:
             self.buckets.popitem(last=False)
-        return wait
+        return wait, 'address_rate_limited' if wait else None
+
+    def throttle(self, peer, path):
+        return self.check(peer, path)[0]
+
+    @staticmethod
+    def record(scope, code, reason):
+        """Count a guard rejection in the same per-request log and /metrics as admission rejections."""
+        metrics = getattr(getattr(scope.get('app'), 'state', None), 'metrics', None)
+        if metrics is not None:
+            metrics.reject(code, reason)
+        else:
+            logging.getLogger('askiisc.requests').info(
+                json.dumps({'http': code, 'status': f'rejected:{reason}', 'tenant': None}))
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
@@ -100,6 +148,9 @@ class RequestGuard:
         origin = os.environ.get('AUTH_PUBLIC_ORIGIN')
         if origin and authority.hostname not in {urlsplit(origin).hostname,'127.0.0.1','::1','localhost'}:
             return await reject(400, 'Unrecognized host')
+        allowed = {h.strip().lower() for h in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,::1,testserver').split(',')}
+        if not origin and authority.hostname not in allowed:
+            return await reject(400, 'Unrecognized host')
         # Reject ambiguous framing even on development/direct ASGI deployments.
         for name in [b'host', b'content-length', b'content-type', b'authorization', b'origin', b'transfer-encoding']:
             if sum(k.lower()==name for k,v in raw_headers) > 1:
@@ -107,9 +158,11 @@ class RequestGuard:
         if b'content-length' in headers and b'transfer-encoding' in headers:
             return await reject(400, 'Ambiguous request framing')
         path = scope.get('path','/')
-        wait = self.throttle((scope.get('client') or ('unknown',0))[0], path)
+        wait, reason = self.check((scope.get('client') or ('unknown',0))[0], path)
         if wait:
-            return await reject(429, 'Too many requests. Try again later.', retry_after_s=wait)
+            self.record(scope, 429, reason)
+            return await reject(429, 'Too many requests. Try again later.', reason=reason,
+                                limiter='request_guard', retry_after_s=wait)
         if scope['method'] in {'POST','PUT','PATCH','DELETE'}:
             expected = origin or (scope.get('scheme','http')+'://'+host)
             if headers.get(b'sec-fetch-site') == 'cross-site' or (b'origin' in headers and headers[b'origin'] != expected):
@@ -123,10 +176,12 @@ class RequestGuard:
                 if int(length) > self.max_body:
                     return await reject(413, 'Request body is too large')
             content_type = headers.get(b'content-type','').split(';')[0].strip().lower()
-            if content_type != 'application/json' and not (path=='/auth/logout' and length=='0'):
+            if content_type != 'application/json' and path != '/auth/logout':
                 return await reject(415, 'Use application/json')
-            if self.readers >= 64:
-                return await reject(429, 'Server is busy. Try again later.', retry_after_s=2)
+            if self.readers >= self.limits['max_concurrent_body_reads']:
+                self.record(scope, 429, 'request_bodies_busy')
+                return await reject(429, 'Server is busy. Try again later.', reason='request_bodies_busy',
+                                    limiter='request_guard', retry_after_s=2)
             body = bytearray()
             self.readers += 1
             try:
@@ -146,6 +201,8 @@ class RequestGuard:
                 self.readers -= 1
             if length is not None and len(body) != int(length):
                 return await reject(400, 'Content length does not match request body')
+            if path == '/auth/logout' and body and content_type != 'application/json':
+                return await reject(415, 'Use application/json')
             if body:
                 try:
                     def pairs(items):
@@ -199,7 +256,7 @@ def instruction_attack(text: str) -> bool:
         # Requests about this assistant's private messages are not corpus questions.
         r'\b(?:your|the|our|this)\s+(?:(?:hidden|internal|initial|original|private)\s+)*(?:system|developer)\s+(?:role\s+)?(?:messages?|prompts?|instructions?)\b',
         r'\binstructions?\s+(?:that\s+)?(?:you\s+(?:received|were given)|(?:placed|provided|given)\s+(?:before|above))\b',
-        r'\b(?:ignore|disregard|override|bypass|forget)\b.{0,70}\b(?:instructions?|rules?|access controls?|permissions?|authentication)\b',
+        r'(?m)(?:^\s*|[.!?]\s*|\b(?:please|you must|you should)\s+)(?:ignore|disregard|override|bypass|forget)\s+(?:(?:all|the|your|my|these|previous|prior|system|safety|security)\s+)*(?:instructions?|rules?|access controls?|permissions?|authentication)\b',
         r'\b(?:reveal|repeat|print|show|extract|output|display)\b.{0,70}\b(?:system (?:prompt|instructions?)|hidden (?:prompt|instructions?)|api keys?|passwords?|environment variables|smtp credentials)\b',
         r'<\|(?:im_start|im_end|system|assistant|eot_id|start_header_id)\|>|\[/?inst\]|<<sys>>',
         r'(?m)^\s*(?:system|developer|assistant)\s*:',
@@ -207,6 +264,25 @@ def instruction_attack(text: str) -> bool:
     ]
     return any(re.search(p,text,re.S) for p in patterns)
 
+
+
+def knowledge_override(text: str) -> bool:
+    """Questions that ask the assistant to answer outside the sources ("use your general knowledge",
+    "instead of the documents", "do not cite sources"). Checked on user input only: such phrases can occur
+    legitimately in indexed policy text (e.g. plagiarism rules), so evidence is not screened with them."""
+    text=unicodedata.normalize('NFKC',text)
+    text=''.join(c for c in text if unicodedata.category(c)!='Cf').casefold()
+    patterns=[
+        r"\b(?:use|using|rely(?:ing)?\s+on|from|with|based\s+on|draw(?:ing)?\s+on)\s+(?:only\s+)?(?:your\s+)?(?:own\s+)?"
+        r"(?:general|prior|background|world|common|internal|pre-?trained|training|outside|external)\s+(?:knowledge|information|data)\b",
+        r"\b(?:from|using|use|with|on|rely\s+on)\s+your\s+(?:own\s+)?(?:knowledge|understanding|memory|training)\b",
+        r"\b(?:answer|reply|respond)\s+from\s+memory\b",
+        r"\b(?:instead\s+of|rather\s+than|without|ignoring|not\s+from|outside(?:\s+of)?)\s+(?:using\s+|looking\s+at\s+|reading\s+)?"
+        r"(?:the\s+|your\s+|these\s+|any\s+)?(?:provided\s+|retrieved\s+|given\s+)?(?:documents?|sources?|context|evidence|passages?|corpus)\b",
+        r"\b(?:do\s+not|don['’]?t|never|without|no\s+need\s+to)\s+(?:cite|citing|use|using|include|including|give|giving|add|adding)\s+"
+        r"(?:any\s+)?(?:the\s+)?(?:sources?|citations?|references?|markers?)\b",
+    ]
+    return any(re.search(p,text) for p in patterns)
 
 def evidence_instruction_attack(hit: dict) -> bool:
     fields = ('text', 'title', 'section', 'programme', 'department', 'instructor', 'excerpt', 'location')

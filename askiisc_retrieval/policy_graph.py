@@ -21,6 +21,12 @@ PROGRAMMES={
  'MSc':r'm\s*\.?\s*sc\.?|master\s+of\s+science',
  'BTech':r'b\s*\.?\s*tech\.?|bachelor\s+of\s+technology',
 }
+# Programme names are whole tokens: no letter directly before the match, and an
+# optional plural "s" then no letter after it. Without this, "Graph Databases"
+# contained "ph D" and "SystemTechnologies" contained "m Tech" (#59).
+_L=r'(?<![a-z])'
+_R=r's?(?![a-z])'
+PROGRAMMES={name:_L+'(?:'+pattern+')'+_R for name,pattern in PROGRAMMES.items()}
 BRIDGES={'IS_A','AT_INSTITUTION','IN_DEPARTMENT','HAS_CYCLE'}
 
 def programmes(value):

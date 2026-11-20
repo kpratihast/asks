@@ -1,0 +1,71 @@
+# Stale-version questions (PRD.md:258 asks for 10% of the evaluation set; #44).
+# Kept separate from the held-out test_cds120.yaml, which is not edited or tuned on.
+#
+# Each question is asked against a private index (tools/eval_stale.py) that holds the current pages from
+# tests/pages/ AND an older, superseded version of the same URL (fixtures/superseded_*.html) that gives a
+# conflicting answer. The superseded version is embedded but not in the active snapshot (FR-9), so:
+#   - no returned passage may come from it (superseded passages = 0), and
+#   - the current answer should be found (`current` matches a passage from `url`).
+# `superseded` matches the conflicting text, so the control search (no version filter) can show that the
+# old answer really is in the index and would be found without the filter.
+questions:
+  - id: ST01
+    question: What is the minimum number of credits an M.Tech (CDS) student must earn?
+    url: https://cds.iisc.ac.in/courses/m-tech-course-requirements/
+    current: 'minimum of 64 credits'
+    superseded: 'minimum of 52 credits'
+  - id: ST02
+    question: What minimum CGPA is required to continue in the M.Tech programme after the first year?
+    url: https://cds.iisc.ac.in/courses/m-tech-course-requirements/
+    current: 'CGPA required\s+to continue in the M\.Tech\. programme is 5\.0'
+    superseded: 'programme is 4\.5'
+  - id: ST03
+    question: How many credits does the M.Tech project carry?
+    url: https://cds.iisc.ac.in/courses/m-tech-course-requirements/
+    current: 'project carries 25 credits'
+    superseded: 'project carries 24 credits'
+  - id: ST04
+    question: Where is DS 252 held in the Aug-Dec 2026 term?
+    url: https://cds.iisc.ac.in/courses/schedule/
+    current: 'DS 252.*CDS 202'
+    superseded: 'DS 252.*CDS 108'
+  - id: ST05
+    question: When is the first class of DS 221 in the Aug-Dec 2026 term?
+    url: https://cds.iisc.ac.in/courses/schedule/
+    current: 'Aug 04, 2026'
+    superseded: 'Aug 13, 2026'
+  - id: ST06
+    question: Which room is DS 256 in for the Aug-Dec 2026 term?
+    url: https://cds.iisc.ac.in/courses/schedule/
+    current: 'DS 256.*CDS 102.*Aug 12, 2026'
+    superseded: 'DS 256.*CDS 419'
+  - id: ST07
+    question: Where does DS 307 Ethics in AI meet this term?
+    url: https://cds.iisc.ac.in/courses/schedule/
+    current: 'DS 307.*CDS 419'
+    superseded: 'DS 307.*CDS 108'
+  - id: ST08
+    question: Which venue was DS 216 in during the Jan-Apr 2026 term?
+    url: https://cds.iisc.ac.in/courses/schedule/
+    current: 'DS 216.*CDS 102'
+    superseded: 'DS 216.*CDS 304'
+  - id: ST09
+    question: What are the prerequisites for DS 252 Cloud Computing?
+    url: https://cds.iisc.ac.in/courses/descriptions/
+    current: 'Data Structures, Programming and Algorithm'
+    superseded: 'Operating Systems and Computer Networks'
+  - id: ST10
+    question: What is the credit structure of DS 211 Numerical Optimization?
+    url: https://cds.iisc.ac.in/courses/descriptions/
+    current: 'DS 211 \(AUG\) 3:0'
+    superseded: 'DS 211 \(AUG\) 2:1'
+  - id: ST11
+    question: In which semester is DS 393 offered?
+    url: https://cds.iisc.ac.in/courses/descriptions/
+    current: 'DS 393 \(JAN\)'
+    superseded: 'DS 393 \(AUG\)'
+  - id: ST12
+    question: What are the prerequisites for DS 393?
+    url: https://cds.iisc.ac.in/courses/descriptions/
+    current: 'DS 211 or background in Numerical Linear Algebra'
+    superseded: 'DS 295 Parallel Programming'

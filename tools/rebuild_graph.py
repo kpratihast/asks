@@ -23,7 +23,7 @@ def rebuild(base,out):
     edges=build_edges(active);JsonGraphStore(edges).save(out/'graph.json')
     digest=hashlib.sha256(raw+GRAPH_RULES_VERSION.encode()).hexdigest()
     snap=Snapshot('snap-'+digest[:10],old.embedding_model,GRAPH_RULES_VERSION,old.active_version_ids,
-                  tuple(sorted({c.department for c in chunks if c.version_id in old.active_version_ids})))
+                  tuple(sorted({c.department for c in active if c.version_id in old.active_version_ids})))
     JsonSnapshotProvider.write(out/'snapshot.json',snap)
     # Session data is copied again immediately before an operator activates the candidate.
     auth=base/'auth/sessions.sqlite3'

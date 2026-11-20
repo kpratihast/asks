@@ -41,11 +41,11 @@ Budget APIs use USD. The default alert is USD 20, approximately ₹1,904 at an *
 
 ## 1. Prepare your workstation and account
 
-Use the current application folder, rather than the older prototype on port 8080:
+Use the cloned `asks` folder (see [README.md](README.md)), rather than the older prototype on port 8080:
 
 ```bash
-cd /Users/kshitij/mvps/askiisc/askiisc-retrieval
-source /Users/kshitij/Desktop/askiisc/.venv/bin/activate
+cd asks
+source .venv/bin/activate
 python -m pytest -q
 ```
 

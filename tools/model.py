@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -135,7 +136,7 @@ def assert_owned(panes, table=None, port_pids=None):
     return table
 
 
-def stop(timeout):
+def stop(timeout, force=False):
     current = controlled_panes()
     assert_owned(current)
     active = [(target, p) for target, p in current if not p['dead']]
@@ -151,16 +152,33 @@ def stop(timeout):
             print('Model server stopped.', flush=True)
             return
         time.sleep(0.5)
-    raise SwitchError('Graceful shutdown timed out. No replacement model was started. '
-                      'Inspect the model pane; no process was force-killed.')
+    if not force:
+        raise SwitchError('Graceful shutdown timed out. No replacement model was started. Inspect the model pane, '
+                          'or run ./model.sh stop --force to kill the managed model server.')
+    # --force: kill only the process tree of our own managed pane (assert_owned above verified it runs the
+    # Ask IISc model server); unmanaged processes are never touched.
+    table = processes()
+    owned = {pid for pid in table if any(descendant(pid, p['pid'], table) for _, p in active)}
+    for pid in sorted(owned, reverse=True):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if not listeners():
+            print(f'Model server force-stopped ({len(owned)} process(es) killed).', flush=True)
+            return
+        time.sleep(0.5)
+    raise SwitchError(f'Port {PORT} is still in use after --force; check `lsof -iTCP:{PORT}`.')
 
 
 def command(profile, executable, fraction):
     # Override inherited model-specific environment settings for reproducible switching.
-    return ['env', 'VLLM_METAL_USE_PAGED_ATTENTION=1', f'VLLM_METAL_MEMORY_FRACTION={fraction}',
+    return ['env', '-u', 'VLLM_METAL_USE_PAGED_ATTENTION', '-u', 'VLLM_METAL_MEMORY_FRACTION',
             str(executable), 'serve', profile.repo, '--served-model-name', ALIAS,
             '--host', '127.0.0.1', '--port', str(PORT), '--max-model-len', '4096',
-            '--max-num-seqs', '1', '--enable-prefix-caching']
+            '--max-num-seqs', '1', '--gpu-memory-utilization', str(fraction), '--enable-prefix-caching']
 
 
 def cache_model(profile, python, offline):
@@ -289,6 +307,8 @@ def main(argv=None):
     parser.add_argument('--memory-fraction', type=float, help='Override the Metal memory budget (0 < value <= 1)')
     parser.add_argument('--timeout', type=float, default=600, help='Readiness timeout in seconds (default 600)')
     parser.add_argument('--stop-timeout', type=float, default=60)
+    parser.add_argument('--force', action='store_true',
+                        help='with stop: if graceful shutdown times out, kill the managed model server')
     parser.add_argument('--dry-run', action='store_true', help='Print model/command without downloads or service changes')
     parser.add_argument('--offline', action='store_true', help='Require a complete cached checkpoint')
     parser.add_argument('--restart', action='store_true', help='Restart even if the requested model is ready')
@@ -324,7 +344,7 @@ def main(argv=None):
     else:
         with lock():
             if action == 'stop':
-                stop(args.stop_timeout)
+                stop(args.stop_timeout, force=args.force)
             else:
                 start(args, action, args.vllm_env.expanduser())
 

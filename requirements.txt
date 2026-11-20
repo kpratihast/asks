@@ -14,3 +14,6 @@ psycopg2-binary>=2.9.9
 
 # Optional offline PDF import for classified documents
 pypdf>=7.0.0,<8
+
+# Patched selector matching for untrusted source pages
+soupsieve>=4.1

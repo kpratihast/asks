@@ -192,11 +192,11 @@ async function health() {
         if (!config.ok) throw Error();
         const ui = await config.json();
         emailLoginEnabled = ui.email_login !== false;
-        $('settings-toggle').hidden = !emailLoginEnabled;
+        $('settings-toggle').hidden = emailLoginEnabled === false && ui.public_chat;
         $('sign-in').hidden = !emailLoginEnabled || identity.authenticated;
         $('sign-out').hidden = !emailLoginEnabled || !identity.authenticated;
         if (!emailLoginEnabled && $('login-dialog').open) $('login-dialog').close();
-        if (!emailLoginEnabled || !ui.public_chat) settings(emailLoginEnabled);
+        if (!ui.public_chat && !identity.authenticated) settings(true);
         $('question').maxLength = ui.max_question_chars;
         $('access-note').textContent = ui.public_chat
             ? 'For integrations that use an assigned key.'

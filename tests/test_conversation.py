@@ -39,13 +39,16 @@ def test_independent_question_ignores_old_private_topic_and_assistant_instructio
 
 
 def test_hello_after_private_question_does_not_prompt_login_but_real_follow_up_does():
-    model = FakeModel('should never be called')
+    model = FakeModel(ABSTAIN)
     c, retrieval = make(model)
     history = [{'role':'user','content':'Show the final examination timetable'}]
     with c:
         assert ask(c, q='hello', history=history).json()['status'] == 'guidance'
-        assert ask(c, q='And what date?', history=history).status_code == 401
-    assert not model.requests and not retrieval.calls
+        assert not model.requests and not retrieval.calls
+        # The follow-up is searched in the guest's public evidence first (#46); it has no answer there,
+        # so the guest gets the sign-in prompt instead of a refusal.
+        response = ask(c, q='And what date?', history=history)
+        assert response.status_code == 401 and response.json()['login_required']
 
 
 @pytest.mark.parametrize('rewrite', ['What is DS 252 about?', '', 'The answer is Yogesh Simmhan.'])
@@ -88,3 +91,43 @@ def test_unknown_question_gets_help_and_discards_stale_history_and_incidental_so
     assert body['status'] == 'abstained' and HELP_REPLY in body['answer']
     assert body['reset_conversation'] and not body.get('sources_that_may_help')
     assert not model.requests and retrieval.calls[0]['q'] == 'zzzzxyz?'
+
+
+# ------------------------------------------------- #50 rewrite tokens, rewrite time and filler follow-ups
+class SlowRewriteModel(FakeModel):
+    """The first call (the rewrite) takes 0.3 s; every call reports 120 prompt + 14 completion tokens."""
+
+    def handler(self, request):
+        if request.url.path != "/v1/models" and not self.requests:
+            import time
+            time.sleep(0.3)
+        return super().handler(request)
+
+
+def test_rewrite_tokens_are_counted_and_its_time_is_not_retrieval_time():
+    model = SlowRewriteModel('Who teaches DS 252?', 'Yogesh Simmhan teaches DS 252 [S1].')
+    c, retrieval = make(model)
+    with c:
+        r = ask(c, q='Who teaches it?', history=HISTORY)
+        tokens = dict(c.app.state.metrics.tokens)
+    body = r.json()
+    assert body['status'] == 'answered' and len(model.requests) == 2           # rewrite + answer
+    assert body['usage']['prompt_tokens'] == 240 and body['usage']['completion_tokens'] == 28
+    t = body['trace']['timings_ms']
+    assert t['rewrite_ms'] >= 300 and t['retrieval_ms'] < 300                   # rewrite time reported on its own
+    assert tokens.get('prompt') == 240 and tokens.get('completion') == 28              # askiisc_tokens_total
+
+
+def test_filler_follow_up_uses_a_rewrite_built_only_from_the_users_words():
+    model = FakeModel('Tell me more about how to apply to CDS M.Tech', 'Apply through the admissions portal [S1].')
+    c, retrieval = make(model)
+    with c:
+        ask(c, q='Tell me more about it', history=[{'role': 'user', 'content': 'How do I apply to CDS M.Tech?'}])
+    assert retrieval.calls[0]['q'] == 'Tell me more about how to apply to CDS M.Tech'
+
+
+@pytest.mark.parametrize('rewrite', ['Tell me more about CDS M.Tech admissions', 'Tell me more about it',
+                                     'The fee is Rs 100 for CDS M.Tech'])
+def test_filler_follow_up_rejects_rewrites_that_add_words(rewrite):
+    from askiisc_serving.conversation import valid_rewrite
+    assert not valid_rewrite('Tell me more about it', rewrite, 1000, 'How do I apply to CDS M.Tech?')

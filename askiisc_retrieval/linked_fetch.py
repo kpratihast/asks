@@ -22,7 +22,11 @@ def _approved(url, hosts):
             and not parts.query and not parts.username)
 
 
-def _download(client, url, hosts, robots):
+NOT_MODIFIED = object()
+
+
+def _download(client, url, hosts, robots, headers=None):
+    """Body of an approved page, NOT_MODIFIED for a 304 to a conditional request, or None."""
     for _ in range(4):
         if not _approved(url, hosts):
             return None
@@ -37,7 +41,9 @@ def _download(client, url, hosts, robots):
                 robots[host] = policy
         if not robots[host] or not robots[host].can_fetch(UA, url):
             return None
-        with client.stream("GET", url) as response:
+        with client.stream("GET", url, headers=headers or None) as response:
+            if response.status_code == 304 and headers:
+                return NOT_MODIFIED
             if response.is_redirect and "location" in response.headers:
                 url = urljoin(url, response.headers["location"])
                 continue
@@ -52,7 +58,13 @@ def _download(client, url, hosts, robots):
     return None
 
 
-def fetch_linked(sources, *, refresh=False):
+def fetch_linked(sources, *, refresh=False, versions=None):
+    """Fetch approved linked pages. On refresh each saved page is re-checked conditionally and stored only
+    when its content changed (FR-1, FR-3)."""
+    if versions is None:
+        from .versions import RawVersions
+        with RawVersions(config.RAW_DIR, raw_name) as own:
+            return fetch_linked(sources, refresh=refresh, versions=own)
     records = []
     robots = {}
     known = {page_key(page["url"]) for page in sources["pages"]}
@@ -86,17 +98,18 @@ def fetch_linked(sources, *, refresh=False):
                     path = config.RAW_DIR / raw_name(target)
                     if refresh or not path.is_file():
                         try:
-                            body = _download(client, target, hosts, robots)
+                            body = _download(client, target, hosts, robots, versions.conditional_headers(target))
                         except (httpx.HTTPError, ValueError):
                             body = None
                         if body is None:
                             print(f"Skipped linked source: {target}", flush=True)
                             continue
-                        path.write_bytes(body)
+                        if body is NOT_MODIFIED:
+                            versions.not_modified(target)
+                        else:
+                            versions.record(target, body)
                     records.append({"url": target, "department": department, "doc_type": options["doc_type"],
                                     "scope": "public"})
-    index = config.RAW_DIR / INDEX
-    temporary = index.with_suffix(".tmp")
-    temporary.write_text(json.dumps(records, indent=2), encoding="utf-8")
-    temporary.replace(index)
+    from .versions import write_if_changed
+    write_if_changed(config.RAW_DIR / INDEX, json.dumps(records, indent=2))
     return len(records)

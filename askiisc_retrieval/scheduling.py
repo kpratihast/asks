@@ -103,7 +103,8 @@ def exam_table_html(layout_pages, title, term, academic_term):
     The ISO date, hours and alternatives come only from PDF text. Unrecognized
     layouts return None; callers retain text instead of inventing a timetable.
     """
-    year=int(academic_term.split('-')[0]);text='\n'.join(layout_pages)
+    year=int(academic_term.split('-')[0]);season=academic_term.split('-')[1] if '-' in academic_term else None
+    text='\n'.join(layout_pages)
     sessions={m[1].lower():time_range(m[2]+'-'+m[3]) for m in SESSION.finditer(text)}
     rows=[];remainder=[]
     for line in text.splitlines():
@@ -116,7 +117,12 @@ def exam_table_html(layout_pages, title, term, academic_term):
         if not times or any(pattern_slot(p) is None for p in alternatives):return None
         month=MONTHS.get(m[4].lower())
         if month is None:return None
-        exam_date=date(year,month,int(m[5]))
+        # #53: an AUG-season term (e.g. "Oct 2020 -Jan 2021") is keyed to its first/start year, but
+        # exam dates in the Jan-Jul spillover belong to the FOLLOWING calendar year, not the term's
+        # start year, or a real exam date (e.g. January 4, 2021) is wrongly placed a year early and
+        # the weekday check below rejects the whole (correct) PDF.
+        exam_year=year+1 if season=='AUG' and month<=7 else year
+        exam_date=date(exam_year,month,int(m[5]))
         if exam_date.strftime('%A').lower()!=m[3].lower():raise ValueError('PDF exam date and weekday disagree')
         rows.append((m[1],alternatives,exam_date,session,times))
     if not rows:return None
